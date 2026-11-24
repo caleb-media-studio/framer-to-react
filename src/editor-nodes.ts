@@ -34,9 +34,9 @@ export function iconPaint(n:OfficialNode,controls:IconControls){
  return {color:typeof color==='string'?color:undefined,strokeWidth:typeof strokeWidth==='number'&&Number.isFinite(strokeWidth)&&strokeWidth>=0&&strokeWidth<=24?strokeWidth:undefined}
 }
 export async function sourceIcon(n:OfficialNode,controls:IconControls){
- const match=await resolveExactIcon(n.icon,n.set)
- if(!match?.svg)return null
  const paint=iconPaint(n,controls)
+ const match=await resolveExactIcon(n.icon,n.set,paint)
+ if(!match?.svg)return null
  const svg=safeSvg(paint.strokeWidth===undefined?match.svg:match.svg.replace(/\bstroke-width=(["'])[\d.]+\1/g,'stroke-width="'+paint.strokeWidth+'"'))
  return {svg,color:paint.color}
 }

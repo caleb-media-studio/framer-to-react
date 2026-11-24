@@ -17,3 +17,7 @@ test('exact registry keys and declared aliases resolve Framer display names with
  assert.equal(await resolveExactIcon('Unrecognized Name','Lucide'),null)
 })
 
+test('captured Flowbite stroke control selects the outline registry entry',async()=>{
+ assert.equal((await resolveExactIcon('Code Branch','Flowbite',{strokeWidth:2}))?.key,'code-branch-outline')
+ assert.equal(await resolveExactIcon('Code Branch','Flowbite'),null)
+})

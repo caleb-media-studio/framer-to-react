@@ -38,7 +38,7 @@ export async function resolveIcon(name:unknown,layer:unknown,set:unknown):Promis
 }
 
 // Exact documented icon identity only. No guessed fallback shape or variant.
-export async function resolveExactIcon(name:unknown,set:unknown):Promise<ResolvedIcon|null>{
+export async function resolveExactIcon(name:unknown,set:unknown,paint?:{strokeWidth?:number}):Promise<ResolvedIcon|null>{
  if(typeof name!=='string'||typeof set!=='string')return null
  const source=sourceById[set]||(iconSets.includes(set)?set:null)
  if(!source||!packs[source])return null
@@ -46,7 +46,11 @@ export async function resolveExactIcon(name:unknown,set:unknown):Promise<Resolve
  // The editor uses display names (e.g. Git Pull Request), registries use kebab-case.
  // Resolve only a canonical exact key or a registry-declared alias, never infer a variant.
  const displayKey=name.trim().replace(/([a-z0-9])([A-Z])/g,'$1-$2').toLowerCase().replace(/\s+/g,'-')
- const canonical=Object.hasOwn(pack.icons,name)?name:Object.hasOwn(pack.icons,displayKey)?displayKey:pack.aliases?.[displayKey]?.parent
+ // Framer's Flowbite set exposes a stroke-width control. The catalog omits the
+ // variant suffix; its stroked artwork corresponds to the explicit outline key.
+ // Only select this variant when the source declares a stroke-width control.
+ const outline=displayKey+'-outline'
+ const canonical=Object.hasOwn(pack.icons,name)?name:Object.hasOwn(pack.icons,displayKey)?displayKey:pack.aliases?.[displayKey]?.parent??(source==='Flowbite'&&paint?.strokeWidth!==undefined&&Object.hasOwn(pack.icons,outline)&&/stroke-width=/.test(pack.icons[outline].body)?outline:undefined)
  const icon=canonical&&Object.hasOwn(pack.icons,canonical)?pack.icons[canonical]:null
  if(!icon||!canonical)return null
  const w=icon.width||pack.width||24,h=icon.height||pack.height||24

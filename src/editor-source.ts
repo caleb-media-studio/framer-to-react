@@ -45,7 +45,7 @@ export function createEditorTextResolver(d:EditorSource,nodeResolver?:import('./
    if(t&&(node.kind==='TextNode'||node.kind==='RichTextNode')){
     if(node.text!==t.text&&String(node.text??'').replace(/\n/g,'')!==t.text.replace(/\n/g,''))conflicts.add(key)
     else{
-     const a={...node.attributes},font={...a.font}
+     const a:import("./types.ts").Attributes={...node.attributes,editorTextSource:true},font={...a.font}
      for(const field of styleFields)if(t[field]!==undefined&&t[field]!==null)a[field]=t[field]
      if(typeof t.fontName==='string')font.family=t.fontName
      if(typeof t.fontWeight==='number')font.weight=t.fontWeight

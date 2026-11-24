@@ -193,7 +193,9 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, reso
     const decoration=ts.decoration??ts.textDecoration??a.textDecoration
     if(/^(none|underline|line-through|overline)$/.test(decoration))put('text-decoration-line',decoration)
     put('font-size', cssLen(ts.fontSize ?? a.fontSize ?? ref.fontSize))
-    put('line-height', cssLen(ts.lineHeight ?? a.lineHeight ?? ref.lineHeight))
+    // Framer's RichText renderer defaults to 1.2em when line-height is omitted.
+    // Tailwind's inherited 1.5 changes intrinsic text height and shifts following layers.
+    put('line-height', cssLen(ts.lineHeight ?? a.lineHeight ?? ref.lineHeight ?? (a.editorTextSource ? '1.2em' : undefined)))
     put('letter-spacing', cssLen(ts.letterSpacing ?? a.letterSpacing ?? ref.letterSpacing))
     // Framer TextStyle colors may be ColorStyle objects ({light, dark}).
     put('color', color(ts.color || ts.textColor || a.textColor || a.color || ref.color,'textColor'))

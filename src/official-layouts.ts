@@ -32,6 +32,7 @@ export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconC
   const out:DesignNode={id:n.id,kind,attributes:a,children:[]}
   if(kind==='TextNode'){
    out.text=String(n.text??'')
+   a.editorTextSource=true
    if(n.tag)a.tag=n.tag
    const blocks=n.children||[]
    if(blocks.length>1||blocks.some(b=>(b.children||[]).length>1))issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Rich text run formatting requires verification'})
