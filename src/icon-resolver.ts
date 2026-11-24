@@ -36,3 +36,15 @@ export async function resolveIcon(name:unknown,layer:unknown,set:unknown):Promis
  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 ${w} ${h}" fill="currentColor">${icon.body}</svg>`
  return {source,key,svg,inferred:false}
 }
+
+// Exact documented icon identity only. No guessed fallback shape or variant.
+export async function resolveExactIcon(name:unknown,set:unknown):Promise<ResolvedIcon|null>{
+ if(typeof name!=='string'||typeof set!=='string')return null
+ const source=sourceById[set]||(iconSets.includes(set)?set:null)
+ if(!source||!packs[source])return null
+ const pack=(await packLoaders[packs[source]]()).default
+ const icon=Object.hasOwn(pack.icons,name)?pack.icons[name]:null
+ if(!icon)return null
+ const w=icon.width||pack.width||24,h=icon.height||pack.height||24
+ return {source,key:name,svg:'<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" fill="currentColor">'+icon.body+'</svg>',inferred:false}
+}

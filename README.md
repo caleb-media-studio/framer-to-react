@@ -22,17 +22,16 @@ The capture plugin and compiler are separate. Changing the compiler does not req
 flowchart LR
     A["Framer project"] --> B["Public Plugin API"]
     B --> C["Capture plugin"]
-    C --> D["Portable design archive"]
+    C --> D["Immutable CJSON / JSON + assets"]
     D --> E["React compiler"]
-    F["Optional source evidence"] --> E
     E --> G["React + TypeScript"]
     G --> H["Vite production build"]
     H --> I["Playwright verification"]
     A -. "Authorized published reference" .-> I
-    I -. "Measured discrepancies" .-> E
+    I -. "Fix compiler and recompile" .-> E
 ```
 
-The archive is the source of record. The compiler reads it without an editor session or a network connection. Published reference evidence and official layout-tree supplements are optional inputs, stored separately from the original capture.
+The archive is the source of record. The compiler reads it without an editor session or a network connection. The archive is the only compiler input. Published references are used only for verification. Missing data requires a new capture, not a patch to the archive.
 
 ## Quick start
 
@@ -45,7 +44,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-Use the local development URL in Framer's plugin development workflow. In the plugin, choose the project, folder or selection and leave **Raw design archive only** enabled. Download the ZIP. The plugin development bundle is built with `bun run build`.
+Use the local development URL in Framer's plugin development workflow. In the plugin, choose the project, folder or selection and leave **Compress source JSON (CJSON + reference dictionary)** enabled. Download the ZIP. The plugin development bundle is built with `bun run build`.
 
 Compile the downloaded archive independently:
 
@@ -72,13 +71,18 @@ Run these alternatives from the repository root using a new output directory. Th
 ### CLI
 
 ```text
-framer-to-react compile <design.zip|directory> --out <directory>
-    [--evidence <directory>] [--layout-source <official-layout-tree.json>]
+framer-to-react compile <design.zip|directory|design.cjson> --out <new-directory>
+framer-to-react pack <design.zip|directory> --out <new.zip>
+framer-to-react unpack <design.zip|directory|design.cjson> --out <new-directory>
 framer-to-react --help
 framer-to-react --version
 ```
 
 Invoke the executable with Bun or Node as above, or link the local checkout with `npm link` to use the command name. No registry release is required.
+
+## Archive standard and CJSON
+
+The capture-only plugin writes design.cjson and design.cjsonref by default alongside original assets and code. The shared dictionary interns keys, object shapes and repeated strings. JSON values are preserved; whitespace is not. The public Plugin API has capture limitations; these are reported, not guessed. See [archive v6](docs/archive-v6.md), [CJSON/1](docs/cjson-v1.md) and [JSON schemas](schemas/). Benchmark an authorized capture with scripts/benchmark-cjson.ts.
 
 ## Generated application
 
@@ -111,7 +115,7 @@ This is early-stage open-source software. The Framer API does not expose every e
 - Published comparison is opt-in; use only projects you are authorized to access.
 - The fidelity goal is zero verified discrepancies under fixed tolerances with complete coverage. No claim of universal 100% parity is made.
 
-See [the archive specification](docs/archive-v5.md), [the fidelity gate](verification/FIDELITY_GATE.md), and [contributing](CONTRIBUTING.md).
+See [the archive specification](docs/archive-v6.md), [the fidelity gate](verification/FIDELITY_GATE.md), and [contributing](CONTRIBUTING.md).
 
 ## Development
 

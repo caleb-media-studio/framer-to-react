@@ -134,7 +134,7 @@ export function packagePage(page:PageInput, snapshot:Snapshot, {rawOnly=false}={
   // Every breakpoint is kept in the complete JSON, and exported separately below.
   const primary = breakpoints.find(n => n.attributes?.isPrimaryBreakpoint === true) || breakpoints[0] || root
   const notes = [...(snapshot.warnings || [])]
-  if (breakpoints.length > 1) notes.push(`${breakpoints.length} responsive breakpoints exist. Component.tsx is the primary draft; merge breakpoint drafts using the original design.json.`)
+  if (!rawOnly && breakpoints.length > 1) notes.push(`${breakpoints.length} responsive breakpoints exist. Component.tsx is the primary draft; merge breakpoint drafts using the original design.json.`)
   if (page.pathIsInferred) notes.push('Page folder path is inferred; Framer did not expose a canonical path for this page.')
   const primaryBundle = rawOnly ? null : generateBundle(snapshotFor(primary, page.path, notes))
   const files:Record<string,string> = {

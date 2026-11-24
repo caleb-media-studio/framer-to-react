@@ -1,3 +1,5 @@
+> Superseded by [archive v6](archive-v6.md). The former external evidence and enrichment workflow is no longer supported by the current compiler.
+
 # Portable design archive specification · v5
 
 Status: experimental, backward-compatible with the original v5 capture namespace. This is a documented interchange format, not Framer's private document format.

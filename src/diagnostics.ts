@@ -83,7 +83,7 @@ function pushNodeIssues(node:DesignNode, page:string, out:DiagnosticIssue[], inv
       !a.fontSize && !a.inlineTextStyle?.fontSize && !a.inlineTextStyle?.id) {
     out.push(inputIssue('typography', 'review', 'TEXT_METRICS_NOT_EXPOSED',
       'Framer did not expose this text layer\'s font size, line height, or alignment through the plugin snapshot.',
-      ctx, 'Use a shared Framer Text Style or a separate rendered-style reference. Do not estimate font sizes from layer bounds.'))
+      ctx, 'Re-export using a capture adapter that exposes the original text style. Do not estimate font sizes from layer bounds.'))
   }
   for (const child of node.children || []) pushNodeIssues(child, page, out, inventory, [...trail, ctx.nodeName], depth + 1)
 }

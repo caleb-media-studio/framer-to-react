@@ -30,7 +30,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-Framer के प्लगइन डेवलपमेंट वातावरण में स्थानीय प्लगइन खोलें। **Raw design archive only** चालू रखकर डिज़ाइन ZIP डाउनलोड करें।
+Framer के प्लगइन डेवलपमेंट वातावरण में स्थानीय प्लगइन खोलें। **Compress source JSON (CJSON + reference dictionary)** चालू रखकर डिज़ाइन ZIP डाउनलोड करें।
 
 ```sh
 bun bin/framer-to-react.ts compile design.zip --out react-app
@@ -48,5 +48,7 @@ npm के लिए टूल की डायरेक्टरी में `
 
 सफल बिल्ड का अर्थ पूरी दृश्य समानता नहीं है। अनुपलब्ध एसेट, असमर्थित इंटरैक्शन और अस्पष्ट संदर्भ रिपोर्ट में दर्ज होते हैं। `compile-report.json` देखें। केवल अधिकृत प्रोजेक्ट का उपयोग करें। प्लगइन, कम्पाइलर, रेंडरिंग, सत्यापन और परीक्षण सहित सभी प्रथम-पक्ष एक्जीक्यूटेबल कोड strict TypeScript में हैं।
 
-[आर्काइव विनिर्देश](../archive-v5.md) · [सत्यापन](../../verification/FIDELITY_GATE.md) · [योगदान](../../CONTRIBUTING.md) · [MIT लाइसेंस](../../LICENSE)।
+[आर्काइव विनिर्देश](../archive-v6.md) · [सत्यापन](../../verification/FIDELITY_GATE.md) · [योगदान](../../CONTRIBUTING.md) · [MIT लाइसेंस](../../LICENSE)।
 
+
+[CJSON/1](../cjson-v1.md) · [Archive v6](../archive-v6.md)

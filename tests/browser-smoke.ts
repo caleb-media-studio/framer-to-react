@@ -1,3 +1,6 @@
+import {collectLive} from '../verification/evidence-sidecar.ts'
+import {collectPreview} from '../verification/fidelity-gate.ts'
+import {compareStyle} from '../verification/fidelity-compare.ts'
 import {collectRenderAudit,compareRenderAudit} from '../verification/render-audit.ts'
 import assert from 'node:assert/strict'
 import {chromium} from '@playwright/test'
@@ -68,6 +71,27 @@ try{
  assert.equal(nested.texts[0].style.fontSize,'12px')
  assert.equal(nested.texts[0].style.color,'rgb(145, 152, 161)')
  assert.equal(nested.texts[0].style.fontWeight,'400')
+ // A semantic paragraph with all its visible text in one span must not be
+ // measured as the paragraph on one side and as the span on the other.
+ const props=['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','textTransform','color']
+ const paragraph='<p style="font:16px Arial;color:blue"><span style="font:600 12px/14px Arial;color:red">Label</span></p>'
+ await auditPage.setContent('<div data-framer-component-type="RichTextContainer">'+paragraph+'</div>')
+ const [liveLabel]=await auditPage.evaluate(collectLive,props)
+ assert.equal(liveLabel.style.tag,'p')
+ assert.equal(liveLabel.style.fontSize,'12px')
+ assert.equal(liveLabel.style.fontWeight,'600')
+ assert.equal(liveLabel.inlineRuns,undefined,'uniform span is the baseline, not an extra run')
+ await auditPage.setContent(paragraph.replace('<p ','<p data-f2a-node="styled-label" '))
+ const candidate=await auditPage.evaluate(collectPreview,{ids:['styled-label'],props})
+ assert.deepEqual(compareStyle(liveLabel.style,candidate['styled-label']!.style),[])
+ await auditPage.locator('span').evaluate(el=>{el.style.fontSize='13px'})
+ const wrong=await auditPage.evaluate(collectPreview,{ids:['styled-label'],props})
+ assert.ok(compareStyle(liveLabel.style,wrong['styled-label']!.style).some(f=>f.field==='fontSize'))
+ // Mixed-size siblings still use the paragraph's baseline and capture distinct runs.
+ await auditPage.setContent('<div data-framer-component-type="RichTextContainer"><p style="font:16px Arial"><span style="font-size:12px">Small</span><span>Large</span></p></div>')
+ const [mixed]=await auditPage.evaluate(collectLive,props)
+ assert.equal(mixed.style.fontSize,'16px')
+ assert.deepEqual(mixed.inlineRuns?.map(r=>[r.text,r.style.fontSize??mixed.style.fontSize]),[['Small','12px'],['Large','16px']])
  await auditPage.close()
  console.log('Browser smoke passed: lazy routes, original named TSX component and controls, editable field, history, responsive variant, direct URL.')
 }finally{await browser.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}

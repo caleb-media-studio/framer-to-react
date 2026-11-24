@@ -62,39 +62,6 @@ test('drops a node matched under two different widths instead of letting one ove
   assert.ok(o.conflicts.some(c => c.nodeId === 't1' && c.kept === 'none'))
 })
 
-test('enrich-export regenerates drafts from evidence but copies design.json byte-for-byte', async () => {
-  const {mkdtempSync, mkdirSync, writeFileSync, readFileSync} = await import('node:fs')
-  const {tmpdir} = await import('node:os')
-  const {join} = await import('node:path')
-  const {execFileSync} = await import('node:child_process')
-  const base = mkdtempSync(join(tmpdir(), 'f2a-enrich-'))
-  const exp = join(base, 'export'), ev = join(base, 'evidence'), out = join(base, 'out')
-  const dir = 'pages/index', bp = `${dir}/breakpoints/1-Desktop`
-  mkdirSync(join(exp, bp), {recursive: true}); mkdirSync(ev)
-  const raw = JSON.stringify(design(text('t1')), null, 2)
-  writeFileSync(join(exp, dir, 'design.json'), raw); writeFileSync(join(exp, bp, 'design.json'), raw)
-  writeFileSync(join(exp, 'manifest.json'), JSON.stringify({pages: [{path: '/', directory: dir, breakpoints: [{name: 'Desktop', id: 'bp', directory: bp, primary: true}]}]}))
-  writeFileSync(join(ev, '_index.1200.json'), JSON.stringify(doc('high')))
-  // foreign breakpoint (layer t1 belongs to 'bp'), mislabelled width, stale preview: none may reach the output
-  writeFileSync(join(ev, '_index.810.json'), JSON.stringify({...doc('high', {...style, fontSize: '48px'}), breakpointId: 'other', provenance: {...prov, viewport: {width: 810, height: 900}}}))
-  writeFileSync(join(ev, '_index.390.json'), JSON.stringify(doc('high', {...style, fontSize: '38px'})))
-  mkdirSync(join(exp, 'preview')); writeFileSync(join(exp, 'preview/STALE.txt'), 'x')
-  const script = new URL('../scripts/enrich-export.ts', import.meta.url).pathname
-  assert.throws(() => execFileSync('node', [script, exp, ev, exp], {stdio: 'pipe'}))
-  execFileSync('node', [script, exp, ev, out], {stdio: 'pipe'})
-  assert.equal(readFileSync(join(out, bp, 'design.json'), 'utf8'), raw)
-  assert.match(readFileSync(join(out, bp, 'component.css'), 'utf8'), /font-size: 62px/)
-  assert.match(readFileSync(join(out, dir, 'component.css'), 'utf8'), /font-size: 62px/)
-  assert.match(readFileSync(join(out, 'reference/FIDELITY.md'), 'utf8'), /\| \/ \| 1200 \| measured \| 1 \|/)
-  assert.ok(Object.keys(readFileSync(join(out, 'preview/src/App.tsx'), 'utf8')).length)
-  const overlay = JSON.parse(readFileSync(join(out, 'reference/overlay.json'), 'utf8')) as Overlay & {skippedEvidence:{file:string}[]}
-  assert.equal(overlay.coverage.find(r => r.width === 810)!.foreignNode, 1)
-  assert.deepEqual((overlay.skippedEvidence as {file:string}[]).map(x => x.file), ['_index.390.json'])
-  const {existsSync} = await import('node:fs')
-  assert.ok(!existsSync(join(out, 'preview/STALE.txt')))
-  assert.ok(existsSync(join(out, 'reference/evidence/_index.1200.json')) && !existsSync(join(out, 'reference/evidence/_index.390.json')))
-})
-
 test('does not apply evidence from a width with no matching breakpoint', () => {
   const o = buildOverlay([{route: '/', doc: {...doc('high'), breakpointId: null}}])
   assert.deepEqual(o.nodes, {})

@@ -186,6 +186,10 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
     const family = font.family || ts.font?.family || a.fontName || a.fontFamily
     put('font-family', typeof family === 'string' ? JSON.stringify(family) : null)
     put('font-weight', cssVal(font.weight ?? ts.font?.weight ?? ts.fontWeight ?? a.fontWeight))
+    const fontStyle=font.style??ts.font?.style??ts.fontStyle??a.fontStyle
+    if(/^(normal|italic|oblique)$/.test(fontStyle))put('font-style',fontStyle)
+    const decoration=ts.decoration??ts.textDecoration??a.textDecoration
+    if(/^(none|underline|line-through|overline)$/.test(decoration))put('text-decoration-line',decoration)
     put('font-size', cssLen(ts.fontSize ?? a.fontSize ?? ref.fontSize))
     put('line-height', cssLen(ts.lineHeight ?? a.lineHeight ?? ref.lineHeight))
     put('letter-spacing', cssLen(ts.letterSpacing ?? a.letterSpacing ?? ref.letterSpacing))
@@ -312,6 +316,9 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     return '  '.repeat(depth) + '{/*__FTA_REUSE_' + id + '__*/}'
   }
   function renderNode(node:DesignNode, depth:number, parentAxis:Axis = null, parent:DesignNode|null = null, field:NativeField|null = null):string {
+    // Framer overlays are not ordinary in-flow or absolute frames. Preserve the
+    // captured subtree in the archive, but do not paint an unopened overlay.
+    if (/^(Relative|Fixed)OverlayNode$/.test(node.kind))return ''
     const reference=options.referenceOverlay?.nodes[node.id]
     if(reference)node={...node,reference}
     const id = ++nodeIndex
@@ -362,7 +369,7 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     const content = runs ? runs.map(r=>Object.keys(r.style).length ? '<span style={'+JSON.stringify(r.style)+'}>{'+JSON.stringify(r.text)+'}</span>' : '{'+JSON.stringify(r.text)+'}').join('') : typeof node.text === 'string'
       ? `{${JSON.stringify(textWithLayerBreaks(node))}}`
       : (node.children || []).map(child => render(child, depth + 1, stackAxis(node), node, ownField)).join('\n')
-    const inlineSvg = svgMarkup(node)
+    const inlineSvg = svgMarkup(node) || options.resolveCapturedIcon?.(node) || null
     if (inlineSvg) {
       const svgSource = '/' + svgPath(inlineSvg)
       if (inheritsIconColor(inlineSvg)) {

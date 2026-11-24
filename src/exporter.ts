@@ -1,7 +1,6 @@
 import type {SDKNode,SDKClient,DesignNode,Attributes,Snapshot,CaptureState,HydrationOptions} from './types.ts'
 import {errorMessage} from './types.ts'
 import { isTextNode } from '@framer/plugin'
-import {resolveIcon} from './icon-resolver.ts'
 /**
  * Read-only exporter for the publicly documented Framer Plugin canvas API.
  * This is a plugin-API snapshot, not Framer's private internal project JSON.
@@ -23,10 +22,10 @@ const FIELDS = [
   'gridItemVerticalAlignment', 'link', 'linkOpenInNewTab',
   'linkRelValues', 'linkSmoothScroll', 'linkPreserveParams',
   'isBreakpoint', 'isPrimaryBreakpoint', 'font', 'fontName', 'fontFamily',
-  'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing',
+  'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'fontFeatureSettings', 'textTransform', 'textDecoration', 'paragraphSpacing', 'balance', 'textStyle', 'textStyleId', 'tag', 'viewBox', 'onTap',
   'textAlign', 'textAlignment', 'textColor', 'color', 'text', 'inlineTextStyle',
   'textTruncation', 'componentIdentifier', 'componentName', 'controls',
-  'svg', 'svgContent', 'icon', 'set', 'iconSet', 'iconSetId', 'image', 'alt', 'altText',
+  'ariaLabel', 'd', 'fill', 'stroke', 'strokeWidth', 'x', 'y', 'floatingPlacement', 'floatingAlignment', 'floatingOffsetX', 'floatingOffsetY', 'svg', 'svgContent', 'icon', 'set', 'iconSet', 'iconSetId', 'image', 'alt', 'altText',
 ]
 
 /** Strip methods, circular references, and unsafe non-JSON objects. */
@@ -34,16 +33,16 @@ export function jsonSafe(value:unknown, depth = 0, seen = new WeakSet<object>())
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
   if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') return undefined
-  if (depth > 6) return '[Maximum object depth]'
+  if (depth > 64) throw Error('SDK object nesting exceeds capture limit')
   if (typeof value === 'object') {
     if (seen.has(value)) return '[Circular reference]'
     seen.add(value)
     const output:Record<string,unknown> = Array.isArray(value) ? [] as unknown as Record<string,unknown> : {}
     try {
-      const keys = Object.keys(value).slice(0, 75)
+      const keys = Object.keys(value)
       // Framer SDK assets and styles can be class instances with non-enumerable fields.
       if (!Array.isArray(value)) {
-        for (const key of ['id', 'name', 'url', 'src', 'color', 'value', 'type', 'family', 'weight', 'style', 'fontSize', 'lineHeight', 'letterSpacing', 'textAlign', 'alignment', 'tag', 'transform', 'font', 'breakpoints', 'minWidth', 'paragraphSpacing', 'balance', 'path', 'light', 'dark', 'imageUrl', 'alt', 'altText']) {
+        for (const key of ['id', 'name', 'url', 'src', 'color', 'value', 'type', 'family', 'selector', 'weight', 'style', 'fontSize', 'lineHeight', 'letterSpacing', 'textAlign', 'alignment', 'tag', 'transform', 'font', 'breakpoints', 'minWidth', 'paragraphSpacing', 'balance', 'path', 'light', 'dark', 'imageUrl', 'alt', 'altText']) {
           if (!keys.includes(key) && key in value) keys.push(key)
         }
       }
@@ -52,7 +51,8 @@ export function jsonSafe(value:unknown, depth = 0, seen = new WeakSet<object>())
         try {
           const v = jsonSafe((value as Record<string,unknown>)[key], depth + 1, seen)
           if (v !== undefined) output[key] = v
-        } catch { /* Non-serializable SDK getter. */ }
+          else if(Array.isArray(value))output[key]=null
+        } catch (error) { throw Error('SDK property '+key+': '+errorMessage(error)) }
       }
     } finally { seen.delete(value) }
     return output
@@ -124,26 +124,20 @@ export async function readLayer(node:SDKNode, state:CaptureState, depth = 0, tra
     }
   }
   // VectorSetItemNode exposes its actual SVG through the public getSVG() API.
-  if (result.kind === 'VectorSetItemNode' && !result.attributes.svg && typeof node.getSVG === 'function') {
+  if (['VectorSetItemNode','ShapeContainerNode'].includes(result.kind) && !result.attributes.svg && typeof node.getSVG === 'function') {
     try {
       const svg = await node.getSVG()
       if (typeof svg === 'string' && /^\s*<svg(?:\s|>)/i.test(svg)) {
         result.attributes.svg = svg
-        result.attributes.vectorOrigin = 'editor-vector-set-item'
+        result.attributes.vectorOrigin = 'editor-svg-api'
       } else state.warnings.add(`${layerPath} [${result.id}]: VectorSetItemNode.getSVG returned no SVG`)
     } catch(error) { state.warnings.add(`${layerPath} [${result.id}]: VectorSetItemNode.getSVG failed: ${errorMessage(error)}`) }
   }
-  if ((result.kind === 'ComponentInstanceNode' || result.kind === 'IconNode') && !result.attributes.svg && !result.attributes.svgContent) {
-    const match = await resolveIcon(result.attributes.icon || result.attributes.componentName, result.attributes.name || result.layerPath, result.attributes.set || result.attributes.iconSetId || result.attributes.iconSet)
-    if (match?.svg) {
-      result.attributes.svg = match.svg
-      result.attributes.iconKey = match.key
-      result.attributes.vectorOrigin = match.source || 'Lucide'; result.attributes.iconSourceInferred = Boolean(match.inferred)
-    } else if (match?.unavailable) {
-      result.attributes.iconSource = match.source
-      result.attributes.iconExportStatus = 'missing-svg'
-      state.warnings.add('SVG source ' + match.source + ' needs original vector data; inspect design.json iconExportStatus')
-    }
+  if (['ComponentInstanceNode','IconNode','ShapeContainerNode','PathNode'].includes(result.kind)
+      && !result.attributes.svg && !result.attributes.svgContent
+      && (result.attributes.icon || result.attributes.set || result.kind==='ShapeContainerNode' || result.kind==='PathNode')){
+    result.attributes.iconExportStatus = 'source-vector-unavailable'
+    state.warnings.add(layerPath+' ['+result.id+']: exact vector artwork not exposed by the capture API.')
   }
   if (typeof result.attributes.text === 'string') result.text = result.attributes.text
   if (result.text === undefined && confirmedText && typeof node.getText === 'function') {
@@ -197,6 +191,7 @@ export async function captureSelection(framer:SDKClient, maxNodes = 750):Promise
     disclaimer: 'Snapshot of properties exposed through the public Framer Plugin API; not Framer internal source JSON.',
     exportedAt: new Date().toISOString(),
     selectedCount: selection.length,
+    truncated:state.count>=state.maxNodes,
     nodeCount: state.count,
     roots,
     warnings: [...state.warnings],

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/caleb-media-studio/framer-to-react/blob/main/schemas/manifest-v6.schema.json",
+  "title": "Framer design archive manifest v6",
+  "type": "object",
+  "required": [
+    "format",
+    "captureOnly",
+    "pages"
+  ],
+  "properties": {
+    "format": {
+      "enum": [
+        "framer-to-agent/folder-export-v6",
+        "framer-to-agent/selection-export-v6"
+      ]
+    },
+    "captureOnly": {
+      "const": true
+    },
+    "requestedPages": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/page"
+      }
+    },
+    "failures": {
+      "type": "array"
+    },
+    "captureAdapter": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "page": {
+      "type": "object",
+      "required": [
+        "path",
+        "directory"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "breakpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "directory"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "width": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "primary": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

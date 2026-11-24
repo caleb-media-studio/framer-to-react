@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Capture-only plugin; immutable archive-only compiler. Removed external evidence and layout-source options.
+- Capture archive v6 and CJSON/1: shared dictionary, integrity checks, background worker and CLI pack/unpack.
+- Used font variant capture and original source icon references; unavailable fields reported.
+
 - Separate raw Framer design capture from independent React compilation.
 - Document the portable v5 archive and optional measured reference inputs.
 - Add strict TypeScript archive compiler and CLI, Bun-first development and Node/npm compatibility.

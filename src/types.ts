@@ -47,6 +47,7 @@ export interface ReusableBlock {id:number;kind:'component'|'layout';name?:string
 export interface ReusableVariant {path:string;route:string;tsx:string;blocks:ReusableBlock[]}
 export interface RenderOptions {
   layoutSlot?:boolean
+  resolveCapturedIcon?:(node:DesignNode)=>string|null
   collectReusable?:boolean
   referenceOverlay?:Overlay|null
   resolveCodeComponent?:(identifier:unknown)=>CodeImport|null
