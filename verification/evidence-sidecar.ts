@@ -172,7 +172,9 @@ async function main(): Promise<void> {
         const typed=frame?textResolver?.resolve({roots:[frame as DesignNode]},record?.id??'').roots[0]??frame as DesignNode:null
         const binding=layouts?.bindings.find(p=>p.id===record?.id&&p.path===route)
         const template=layouts?.templates.find(t=>t.id===binding?.layout)
-        const combined=typed&&template?spliceContent(selectLayoutVariant(template,width).root,typed):typed
+        // The page breakpoint is an editor-only wrapper, not a named ancestor in
+        // the published DOM. Keep its identity and children, but omit its name.
+        const combined=typed&&template?spliceContent(selectLayoutVariant(template,width).root,{...typed,attributes:{...typed.attributes,name:''}}):typed
         const archive = combined ? archiveTexts(expandCanvasTree(combined,id=>canvas.get(String(id))||null)) : [];
         const result = frame ? matchTexts(archive, live) : { matches: [], unmatchedArchive: [], unmatchedLive: live.map((l) => l.index) };
         const evidence = result.matches.map((m) => {
