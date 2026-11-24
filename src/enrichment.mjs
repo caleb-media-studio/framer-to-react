@@ -51,10 +51,13 @@ export function buildOverlay(evidenceDocs, editorNodes = new Map(), nodeBreakpoi
     const row = {route, width, breakpointId: doc.breakpointId ?? null, high: 0, medium: 0, low: 0, applied: 0, appliedFields: 0, foreignNode: 0,
       unmatchedArchive: (doc.unmatchedArchive || []).length, unmatchedLive: (doc.unmatchedLive || []).length,
       status: doc.breakpointId ? 'measured' : 'unverified: no breakpoint for this width'}
+    const consensus = styleConsensus(doc, editorNodes, nodeBreakpoint)
+    row.consensus = 0
     for (const e of doc.evidence || []) {
       row[e.confidence] = (row[e.confidence] || 0) + 1
+      const byConsensus = !APPLY_CONFIDENCE.has(e.confidence) && consensus.has(e.nodeId)
       // Unverified widths (no breakpoint matched) are reported, never applied.
-      if (!doc.breakpointId || !APPLY_CONFIDENCE.has(e.confidence) || !e.nodeId) continue
+      if (!doc.breakpointId || (!APPLY_CONFIDENCE.has(e.confidence) && !byConsensus) || !e.nodeId) continue
       if (nodeBreakpoint && nodeBreakpoint.get(e.nodeId) !== doc.breakpointId) { row.foreignNode++; continue }
       const editor = editorNodes.get(e.nodeId)
       for (const f of ['fontWeight', 'fontFamily']) {
@@ -74,22 +77,24 @@ export function buildOverlay(evidenceDocs, editorNodes = new Map(), nodeBreakpoi
       // Restore explicit published hard breaks only if the captured text is exactly unchanged
       // after removing those break characters. Never replace words, punctuation, or spaces.
       const original = editor?.text;
-      const restored = typeof e.hardBreakText === 'string' && e.hardBreakText.includes('\n') &&
+      let restored = typeof e.hardBreakText === 'string' && e.hardBreakText.includes('\n') &&
         typeof original === 'string' && !original.includes('\n') &&
         e.hardBreakText.replace(/\n/g, '') === original &&
         !editor?.richTextHTML
         ? e.hardBreakText : null;
+      // Consensus proves the style, not which live element is this node, so per-element content is not restored.
+      if (byConsensus && restored !== null) restored = null
       const tag = e.style?.blocks === '1' && /^(h[1-6]|p)$/.test(e.style?.tag || '') ? e.style.tag : null;
       if (!Object.keys(textStyle).length && restored === null && tag === null) continue
       // Node ids are per breakpoint frame; if one ever shows up under two widths, neither value is trusted.
       if (rejected.has(e.nodeId)) continue
-      if (nodes[e.nodeId]) { rejected.add(e.nodeId); conflicts.push({route, width, nodeId: e.nodeId, field: '*', editor: null, reference: 'duplicate evidence for node', kept: 'none'}); const prev = owner.get(e.nodeId); prev.row.applied--; prev.row.appliedFields -= prev.fields; delete nodes[e.nodeId]; continue }
+      if (nodes[e.nodeId]) { rejected.add(e.nodeId); conflicts.push({route, width, nodeId: e.nodeId, field: '*', editor: null, reference: 'duplicate evidence for node', kept: 'none'}); const prev = owner.get(e.nodeId); prev.row.applied--; prev.row.appliedFields -= prev.fields; if (prev.consensus) prev.row.consensus--; delete nodes[e.nodeId]; continue }
       const fieldCount = Object.keys(textStyle).length + Number(restored !== null) + Number(tag !== null);
-      row.applied++; row.appliedFields += fieldCount
-      owner.set(e.nodeId, {row, fields: fieldCount})
+      row.applied++; row.appliedFields += fieldCount; if (byConsensus) row.consensus++
+      owner.set(e.nodeId, {row, fields: fieldCount, consensus: byConsensus})
       nodes[e.nodeId] = {textStyle, ...(restored === null ? {} : {hardBreakText:restored}), ...(tag === null ? {} : {tag}), provenance: {source: 'published-site', url: doc.provenance?.url, viewport: doc.provenance?.viewport,
         capturedAt: doc.provenance?.capturedAt, responseSha256: doc.provenance?.responseSha256,
-        breakpointId: doc.breakpointId ?? null, confidence: e.confidence, method: e.method, framerName: e.framerName, domPath: e.domPath}}
+        breakpointId: doc.breakpointId ?? null, confidence: e.confidence, method: byConsensus ? `${e.method}+style-consensus` : e.method, framerName: e.framerName, domPath: e.domPath}}
     }
     row.vectors = 0
     const vp=doc.vectorProvenance
@@ -111,6 +116,43 @@ export function buildOverlay(evidenceDocs, editorNodes = new Map(), nodeBreakpoi
     coverage.push(row)
   }
   return {format: OVERLAY_FORMAT, nodes, conflicts, coverage}
+}
+
+const normText = t => String(t ?? '').normalize('NFC').replace(/\s+/g, ' ').trim()
+const textKey = node => node && node.kind === 'TextNode' && typeof node.text === 'string'
+  ? `${node.attributes?.name ?? ''}\u0000${normText(node.text)}` : null
+// Tag and block count are part of the proven style: they differ per element and must not be taken from an order match.
+const styleKey = style => JSON.stringify([...Object.keys(FIELDS), 'tag', 'blocks'].map(f => style?.[f] ?? null))
+
+/**
+ * Node ids whose identity match is ambiguous (repeated name+text) but whose published style is not: every live element
+ * with that name+text belongs to the group (none unmatched, none matched to a node outside it) and all computed the
+ * same text style.
+ */
+function styleConsensus(doc, editorNodes, nodeBreakpoint) {
+  const groups = new Map()
+  for (const e of doc.evidence || []) {
+    if (nodeBreakpoint && nodeBreakpoint.get(e.nodeId) !== doc.breakpointId) continue // foreign entries never count toward quorum
+    const k = textKey(editorNodes.get(e.nodeId))
+    if (k == null) continue
+    groups.set(k, [...(groups.get(k) || []), e])
+  }
+  // Live elements are identified by their published name plus the matched text.
+  const liveName = e => `${e.framerName ?? ''}\u0000${normText(editorNodes.get(e.nodeId)?.text)}`
+  const liveCount = new Map()
+  for (const e of doc.evidence || []) liveCount.set(liveName(e), (liveCount.get(liveName(e)) || 0) + 1)
+  // The collector truncates unmatched live text to 80 characters, so a truncated text blocks every group it prefixes.
+  const unmatched = (doc.unmatchedLive || []).map(l => ({name: l.name ?? '', text: normText(l.text), truncated: String(l.text ?? '').length >= 80}))
+  const archiveBlocked = new Set((doc.unmatchedArchive || []).map(id => textKey(editorNodes.get(id))).filter(k => k != null))
+  const out = new Set()
+  for (const [k, es] of groups) {
+    const [name, text] = k.split('\u0000')
+    if (es.length < 2 || archiveBlocked.has(k) || new Set(es.map(e => styleKey(e.style))).size !== 1) continue
+    if (unmatched.some(l => l.name === name && (l.truncated ? text.startsWith(l.text) : text === l.text))) continue
+    if (es.some(e => liveName(e) !== k) || liveCount.get(k) !== es.length) continue
+    for (const e of es) out.add(e.nodeId)
+  }
+  return out
 }
 
 /** Returns a copy of a design snapshot with overlay entries attached as node.reference. */

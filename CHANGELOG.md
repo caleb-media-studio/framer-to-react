@@ -7,6 +7,7 @@
 - Add strict TypeScript archive compiler and CLI, Bun-first development and Node/npm compatibility.
 - Preserve imported original code components, canvas components and shared layouts.
 - Generate route-level lazy imports, including responsive page variants.
+- Apply measured text styles to repeated, ambiguously matched text layers only when every published candidate shares one style (style consensus), keeping the original low confidence in provenance.
 - Provide public synthetic regression and browser smoke tests, multilingual documentation and third-party notices.
 
 Universal visual and behavioral parity is a goal, not a released guarantee.
