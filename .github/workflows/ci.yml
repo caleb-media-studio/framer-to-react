@@ -1,0 +1,60 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  bun:
+    name: Bun / typecheck, tests, plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.5'
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test:bun
+      - run: bun run build
+      - run: bun bin/framer-to-react.mjs --help
+  npm:
+    name: Node / npm compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: node bin/framer-to-react.mjs --help
+  browser:
+    name: Synthetic archive / production browser smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.5'
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium
+      - run: |
+          mkdir -p .local
+          bun examples/create-archive.mjs .local/demo.zip
+          bun bin/framer-to-react.mjs compile .local/demo.zip --out .local/demo-app
+      - working-directory: .local/demo-app
+        run: |
+          bun install
+          bun run build
+      - run: bun tests/browser-smoke.mjs .local/demo-app/dist
