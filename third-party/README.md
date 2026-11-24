@@ -1,6 +1,6 @@
 # Third-party icon data
 
-The project's own code is MIT-licensed. The generated icon datasets in `src/icon-sets/` and `src/lucide-data.mjs` retain their upstream licenses.
+The project's own code is MIT-licensed. The generated icon datasets in `src/icon-sets/` and `src/lucide-data.json` retain their upstream licenses.
 
 The JSON files here record the collection authors, source repositories and license metadata from the corresponding Iconify packages. The accompanying text files reproduce the upstream license notices. Lucide Static and Sargam Static have separate license texts.
 

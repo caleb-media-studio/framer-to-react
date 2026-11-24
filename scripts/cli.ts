@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {unzipSync} from 'fflate'
 import {compileReactArchive,type ArchiveFiles,type Evidence,type Manifest,type ReferenceDocument,type LayoutSource} from '../src/react-compiler.ts'
-import {prepareOfficialLayouts} from '../src/official-layouts.mjs'
+import {prepareOfficialLayouts} from '../src/official-layouts.ts'
 const argv=process.argv.slice(2)
 if(argv.includes('--help')||argv.includes('-h')||!argv.length){
  console.log('framer-to-react compile <design.zip|directory> --out <directory> [--evidence <directory>] [--layout-source <file>]\n\nRun with Bun (preferred) or Node.js 22.18+. The source archive is never modified.')
@@ -17,7 +17,7 @@ if(argv[0]==='compile'){
  const out=argv[ix+1];argv.splice(ix,2);argv.splice(1,0,out)
 }
 const [input,output,...args]=argv
-if(!input||!output||args.length%2||args.some((x,i)=>i%2===0&&!['--evidence','--layout-source'].includes(x))){console.error('Usage: node scripts/compile-react.mjs <design.zip or extracted directory> <new-output-directory> [--evidence <directory>] [--layout-source <official.json>]');process.exit(2)}
+if(!input||!output||args.length%2||args.some((x,i)=>i%2===0&&!['--evidence','--layout-source'].includes(x))){console.error('Usage: node scripts/compile-react.ts <design.zip or extracted directory> <new-output-directory> [--evidence <directory>] [--layout-source <official.json>]');process.exit(2)}
 const inPath=path.resolve(input),outPath=path.resolve(output)
 if(fs.existsSync(outPath)||outPath===inPath||outPath.startsWith(inPath+path.sep))throw Error('Output must be a new independent directory, outside source')
 const raw:ArchiveFiles=Object.create(null)
