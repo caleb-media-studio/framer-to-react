@@ -19,7 +19,7 @@ export interface EditorPageCapture {
  tree:OfficialNode
  vectors?:{id:string;svg:string}[]
 }
-const typedKinds=new Set(['FrameNode','IconNode','SVGNode','ShapeContainerNode','RelativeOverlayNode','FixedOverlayNode'])
+const typedKinds=new Set(['FrameNode','IconNode','SVGNode','ShapeContainerNode','RelativeOverlayNode','FixedOverlayNode','ComponentInstanceNode'])
 const read=(files:Readonly<ArchiveFiles>,name:string)=>{
  const s=files[name];if(typeof s!=='string')throw Error('Missing editor capture document '+name)
  return JSON.parse(s)

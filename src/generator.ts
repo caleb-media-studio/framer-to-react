@@ -246,13 +246,20 @@ export function expandCanvasInstance(instance:DesignNode, component:DesignNode|n
   const variants = (component?.children || []).filter(v => v && v.kind === 'FrameNode')
   if (!variants.length) return null
   const ia = instance.attributes || {}
-  const variant = variants.find(v => v.id === ia.controls?.variant) || variants[0]
+  const selected=ia.controls?.variant??component?.attributes?.defaultVariantId
+  const variant=selected==null?variants[0]:variants.find(v=>v.id===selected)
+  if(!variant){if(component?.attributes?.editorComponentId)throw Error('Unresolved captured component variant '+String(selected));return null}
+  if(ia.editorComponentId&&component?.attributes?.editorComponentId&&ia.editorComponentId!==component.attributes.editorComponentId)throw Error('Captured component instance identity mismatch')
   const attributes:Attributes = {...variant.attributes}
   for (const key of OFFSET_KEYS) delete attributes[key]
   for (const key of ['name','position','width','height','visible','opacity','rotation',...OFFSET_KEYS]) if (ia[key] !== undefined) attributes[key] = ia[key]
   // Definition IDs repeat for every instance. Use stable occurrence IDs so evidence
   // never applies one instance's text style to an unrelated placement.
-  const scope=(n:DesignNode):DesignNode=>({...n,id:instance.id+'::'+encodeURIComponent(n.id),children:(n.children||[]).map(scope)})
+  const scope=(n:DesignNode):DesignNode=>{
+    const ref=n.attributes?.editorTextReference
+    const value=ref&&ref.providerId===component?.attributes?.editorComponentId?ia.controls?.[ref.id]:undefined
+    return {...n,id:instance.id+'::'+encodeURIComponent(n.id),...(typeof value==='string'?{text:value}:{}),children:(n.children||[]).map(scope)}
+  }
   return {...variant, id: instance.id, kind: 'FrameNode', attributes, children: (variant.children || []).map(scope)}
 }
 // Read-only expansion for matching and indexing. Uses exactly the renderer's variant

@@ -7,7 +7,7 @@ export const EDITOR_NODES='library/editor-nodes.json'
 export const EDITOR_ICON_CONTROLS='library/editor-icon-controls.json'
 export type IconControls=Record<string,{controls?:Record<string,{type?:string;name?:string;defaultValue?:unknown}>}>
 export interface EditorNodes {format:'framer-to-agent/editor-node-capture-v1'|'framer-to-agent/editor-node-capture-v2';projectId:string;branch:string;pageId?:string;pageIds?:string[];nodes:OfficialNode[]}
-const supported=new Set(['FrameNode','IconNode','SVGNode','ShapeContainerNode','RelativeOverlayNode','FixedOverlayNode'])
+const supported=new Set(['FrameNode','IconNode','SVGNode','ShapeContainerNode','RelativeOverlayNode','FixedOverlayNode','ComponentInstanceNode'])
 const identity=(p:string,b:string,id:string)=>JSON.stringify([p,b,id])
 export function parseEditorNodes(value:unknown,source:EditorSource,manifest:Manifest):EditorNodes{
  const d=value as EditorNodes
@@ -97,6 +97,11 @@ export async function createEditorNodeResolver(d:EditorNodes,controls:IconContro
    if(typeof n.width==='string'&&n.width!=='auto')a.width=n.width
    if(typeof n.height==='string'&&n.height!=='auto')a.height=n.height
    return {...node,kind:n.type,attributes:a,children:[]}
+  }
+  if(n.type==='ComponentInstanceNode'){
+   a.editorComponentId=n.component
+   a.controls={...a.controls}
+   for(const [key,value] of Object.entries(n))if(key.startsWith('$control__'))a.controls[key.slice(10)]=value
   }
   if(n.type==='FrameNode'){
    // Prefer explicit source edge strokes; don't paint an all-sides border on a single divider.

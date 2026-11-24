@@ -5,11 +5,12 @@ import {createHash} from 'node:crypto'
 import {strFromU8,strToU8,unzipSync,zipSync} from 'fflate'
 import {packCaptureDocuments,unpackCaptureDocuments,validMember} from '../src/cjson.ts'
 import {EDITOR_SOURCE,parseEditorSource} from '../src/editor-source.ts'
+import {EDITOR_COMPONENTS} from '../src/editor-components.ts'
 import {EDITOR_ICON_CONTROLS} from '../src/editor-nodes.ts'
 import {EDITOR_PROJECT,readProjectEditorCapture,type EditorPageCapture,type ProjectEditorIndex} from '../src/project-editor-capture.ts'
 import type {ArchiveFiles,Manifest} from '../src/types.ts'
 const [input,metadata,controls,shards,output,...flags]=process.argv.slice(2)
-if(!input||!metadata||!controls||!shards||!output||flags.some(f=>f!=='--require-all'))throw Error('Usage: assemble-project-editor-capture.ts <plugin.zip> <editor-metadata.json> <icon-controls.json> <page-capture-dir> <new.zip> [--require-all]')
+if(!input||!metadata||!controls||!shards||!output||flags.some((f,i)=>f!=='--require-all'&&f!=='--components'&&flags[i-1]!=='--components'))throw Error('Usage: assemble-project-editor-capture.ts <plugin.zip> <editor-metadata.json> <icon-controls.json> <page-capture-dir> <new.zip> [--require-all] [--components <editor-components.json>]')
 if(fs.existsSync(output))throw Error('Output archive must be new')
 const sha=(b:Uint8Array)=>createHash('sha256').update(b).digest('hex')
 const inputs=new Map<string,string>()
@@ -46,7 +47,9 @@ const missing=(manifest.pages??[]).filter(p=>!index.pages.some(e=>e.id===p.id)).
 if(flags.includes('--require-all')&&missing.length)throw Error('Incomplete project capture: '+missing.join(', '))
 source[EDITOR_PROJECT]=JSON.stringify(index)
 const validated=readProjectEditorCapture(source,manifest)
-source['library/editor-capture-provenance.json']=JSON.stringify({format:'framer-to-agent/editor-project-provenance-v1',pluginZipSha256:sha(original),metadataSha256:inputs.get(metadata),iconControlsSha256:inputs.get(controls),pageSha256:Object.fromEntries(index.pages.map(p=>[p.id,inputs.get(path.join(shards,p.id+'.json'))])),missingRoutes:missing})
+const componentIndex=flags.indexOf('--components')
+if(componentIndex!==-1){const file=flags[componentIndex+1];if(!file||file.startsWith('--'))throw Error('Missing component capture path');source[EDITOR_COMPONENTS]=strFromU8(read(file))}
+source['library/editor-capture-provenance.json']=JSON.stringify({format:'framer-to-agent/editor-project-provenance-v1',pluginZipSha256:sha(original),metadataSha256:inputs.get(metadata),iconControlsSha256:inputs.get(controls),pageSha256:Object.fromEntries(index.pages.map(p=>[p.id,inputs.get(path.join(shards,p.id+'.json'))])),missingRoutes:missing,componentCaptureSha256:componentIndex===-1?null:inputs.get(flags[componentIndex+1])})
 const packed=await packCaptureDocuments(source)
 const zip=zipSync(Object.fromEntries(Object.entries(packed).map(([k,v])=>[k,typeof v==='string'?strToU8(v):v])),{level:6})
 for(const [file,digest] of inputs)if(sha(fs.readFileSync(file))!==digest)throw Error('Source changed during capture assembly')

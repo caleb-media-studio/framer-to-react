@@ -1,3 +1,4 @@
+import {EDITOR_COMPONENTS,prepareEditorComponents} from '../src/editor-components.ts';
 import {readProjectEditorCapture,EDITOR_PROJECT} from '../src/project-editor-capture.ts';
 // Opt-in evidence sidecar: measures the *published* site (not the editor) at the four QA widths and attaches its computed
 // text styles and bounding boxes to archive TextNodes that match reliably (schema/evidence-match.ts). Output is evidence
@@ -133,11 +134,11 @@ async function main(): Promise<void> {
       if(existsSync(file))library[key]=readFileSync(file,'utf8')
     }
   }
-  const canvas=collectCanvasComponents(library)
+  let canvas=collectCanvasComponents(library)
   const manifest=JSON.parse(readFileSync(join(exportDir,'manifest.json'),'utf8')) as Manifest
   // Use exactly the same original-source adapter as the compiler.
   const sourceFiles:ArchiveFiles={}
-  for(const key of [EDITOR_SOURCE,EDITOR_NODES,EDITOR_ICON_CONTROLS,EDITOR_PROJECT]){
+  for(const key of [EDITOR_SOURCE,EDITOR_NODES,EDITOR_ICON_CONTROLS,EDITOR_PROJECT,EDITOR_COMPONENTS]){
     const file=join(exportDir,key);if(existsSync(file))sourceFiles[key]=readFileSync(file,'utf8')
   }
   if(typeof sourceFiles[EDITOR_PROJECT]==='string'){
@@ -149,8 +150,10 @@ async function main(): Promise<void> {
   }
   const {source:editor,nodes,controls}=readProjectEditorCapture(sourceFiles,manifest)
   const editorNodes=nodes?await createEditorNodeResolver(nodes,controls):undefined
+  const componentSource=editor?await prepareEditorComponents({...library,...sourceFiles},editor,controls):undefined
+  if(componentSource)canvas=componentSource.components
   const textResolver=editor?createEditorTextResolver(editor,editorNodes):undefined
-  const layouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'},controls):null
+  const layouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'},controls,new Map([...canvas].map(([id,node])=>[node.id,id]))):null
   const spliceContent=(node:DesignNode,content:DesignNode):DesignNode=>node.kind==='PlaceholderNode'?content:{...node,children:(node.children??[]).map(n=>spliceContent(n,content))}
 
   const routes = !process.argv.includes('--routes') ? ['/'] : routesArg === 'all' ? designs.map((d) => d.pagePath) : routesArg.split(',');

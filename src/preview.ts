@@ -3,7 +3,7 @@ import {createDesignTokens,type ColorResolver} from './design-tokens.ts'
 import type {ArchiveFiles,PageRecord,DesignNode,Snapshot,LayoutTemplate,LayoutSource,CaptureDiagnostics,CodeFile,ReusableBlock,ReusableVariant,JsonObject} from './types.ts'
 import {textFile} from './types.ts'
 interface PageVariant {label:string;primary:boolean;width:string|number|null;componentPath:string;layoutPath:string|null}
-interface PreviewOptions {editorText?:ReturnType<typeof createEditorTextResolver>;title?:string;diagnostics?:CaptureDiagnostics|null;layoutSource?:LayoutSource|null;resolveCapturedIcon?:(node:DesignNode)=>string|null}
+interface PreviewOptions {componentSource?:Map<string,DesignNode>;editorText?:ReturnType<typeof createEditorTextResolver>;title?:string;diagnostics?:CaptureDiagnostics|null;layoutSource?:LayoutSource|null;resolveCapturedIcon?:(node:DesignNode)=>string|null}
 interface RouteEntry {path:string;loader:string;variants:{label:string;primary:boolean;width:number}[]}
 import {layoutModules,selectLayoutVariant,layoutModulePath,contentWithinLayout} from './official-layouts.ts'
 import {generateBundle} from './generator.ts'
@@ -74,14 +74,14 @@ export function collectCanvasComponents(files:ArchiveFiles) {
   return map
 }
 
-export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null,resolveCapturedIcon,editorText}:PreviewOptions={}) {
+export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null,resolveCapturedIcon,editorText,componentSource}:PreviewOptions={}) {
   const files:ArchiveFiles = {}
   const designTokens=createDesignTokens(sourceFiles)
-  const layouts=layoutModules(layoutSource,pages,resolveCapturedIcon,designTokens.resolve)
+  const canvasComponents=componentSource??collectCanvasComponents(sourceFiles)
+  const layouts=layoutModules(layoutSource,pages,resolveCapturedIcon,designTokens.resolve,id=>canvasComponents.get(String(id))??null)
   Object.assign(files,layouts.files)
   if(layoutSource)files['preview/layout-report.json']=JSON.stringify({assignedRoutes:layouts.assignments.size,issues:layouts.issues},null,2)
   const codeFiles = collectCodeFiles(sourceFiles)
-  const canvasComponents = collectCanvasComponents(sourceFiles)
   for (const file of codeFiles) files[`preview/src/components/code/${file.path}`] = file.source
   const routeEntries:RouteEntry[] = []
   const reusable:ReusableVariant[] = []

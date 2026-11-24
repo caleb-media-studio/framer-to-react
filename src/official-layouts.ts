@@ -15,24 +15,27 @@ const copied=['name','visible','position','top','right','bottom','left','centerX
 
 // This is an additional authorized source format, not a mutation of the raw plugin export.
 // Exact page IDs and template IDs are mandatory. No route-name or product-specific rules.
-export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconControls={}):Promise<LayoutSource>{
- if(doc?.format!=='framer-to-agent/official-layout-tree-v1'||!Array.isArray(doc.templates)||!Array.isArray(doc.pages))throw Error('Invalid official layout source')
- const assets:ArchiveFiles={},templates:LayoutTemplate[]=[],issues:Issue[]=[]
+export function createOfficialNodeConverter(controls:IconControls={},componentIds=new Map<string,string>(),vectors=new Map<string,string>()){
+ const assets:ArchiveFiles={},issues:Issue[]=[]
  async function convert(n:OfficialNode):Promise<DesignNode>{
-  if(n.$truncated)throw Error('Incomplete layout source '+n.id)
+  if(n.$truncated)throw Error('Incomplete official source '+n.id)
   const a:Attributes={};for(const k of copied)if(n[k]!==undefined)a[k]=n[k]
   if(n.width!==undefined)a.width=length(n.width)
   if(n.height!==undefined)a.height=length(n.height)
   if(typeof n.fill==='string')a.backgroundColor=n.fill
   if(n.radius!==undefined)a.borderRadius=n.radius
   if(typeof n.border==='string')a.border=n.border
-  if(n.borderColor&&n.borderStyle)for(const side of ['Top','Right','Bottom','Left'])if(n['border'+side])a['border'+side]=n['border'+side]+' '+n.borderStyle+' '+n.borderColor
+  if(vectors.has(n.id))a.svg=vectors.get(n.id)
+  if(n.type==='ComponentInstanceNode'&&typeof n.component==='string'){a.componentIdentifier=componentIds.get(n.component)??n.component;a.controls={};for(const [k,v] of Object.entries(n))if(k.startsWith('$control__'))a.controls[k.slice(10)]=v}
+  if(n.borderColor)for(const side of ['Top','Right','Bottom','Left'])if(n['border'+side])a['border'+side]=n['border'+side]+' '+(n.borderStyle??'solid')+' '+n.borderColor
   if(typeof n.rotation==='string'&&/^-?[\d.]+deg$/.test(n.rotation))a.rotation=parseFloat(n.rotation)
   if(n.link?.openInNewTab)a.linkOpenInNewTab=true
   const kind=n.type==='RichTextNode'?'TextNode':n.type
   const out:DesignNode={id:n.id,kind,attributes:a,children:[]}
   if(kind==='TextNode'){
-   out.text=String(n.text??'')
+   if(typeof n.text==='string')out.text=n.text
+   else if(n.text?.type==='reference'&&typeof n.text.id==='string'&&typeof n.text.providerId==='string'){a.editorTextReference={id:n.text.id,providerId:n.text.providerId};out.text=''}
+   else out.text=''
    a.editorTextSource=true
    const rich=deriveEditorRichText(n);if(rich){Object.assign(a,rich.base);a.editorRichText=rich}
    if(typeof n.textWrap==='string')a.textWrap=n.textWrap
@@ -57,6 +60,11 @@ export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconC
   const svg=svgMarkup(out);if(svg){try{assets[svgPath(svg)]=safeSvg(svg)}catch(e){issues.push({stage:'compile',severity:'warning',nodeId:n.id,message:String(e)})}}
   return out
  }
+ return {convert,assets,issues}
+}
+export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconControls={},componentIds=new Map<string,string>()):Promise<LayoutSource>{
+ if(doc?.format!=='framer-to-agent/official-layout-tree-v1'||!Array.isArray(doc.templates)||!Array.isArray(doc.pages))throw Error('Invalid official layout source')
+ const {convert,assets,issues}=createOfficialNodeConverter(controls,componentIds),templates:LayoutTemplate[]=[]
  for(const t of doc.templates){
   const variants:LayoutVariant[]=[]
   for(const bp of t.children||[]){
@@ -74,7 +82,7 @@ export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconC
  return {format:'framer-to-agent/layout-source-v1',bindings:doc.pages,templates,assets,issues}
 }
 
-export function layoutModules(source:LayoutSource|null,pages:PageRecord[],resolveCapturedIcon?:(node:DesignNode)=>string|null,resolveCapturedColor?:ColorResolver){
+export function layoutModules(source:LayoutSource|null,pages:PageRecord[],resolveCapturedIcon?:(node:DesignNode)=>string|null,resolveCapturedColor?:ColorResolver,resolveCanvasComponent?:(id:unknown)=>DesignNode|null){
  const files:ArchiveFiles={},assignments=new Map<string,LayoutTemplate>(),issues=[...(source?.issues||[])]
  if(!source)return {files,assignments,issues}
  if(source.format!=='framer-to-agent/layout-source-v1')throw Error('Unsupported normalized layout source')
@@ -89,7 +97,7 @@ export function layoutModules(source:LayoutSource|null,pages:PageRecord[],resolv
  }
  for(const t of new Set(assignments.values()))for(const v of t.variants){
   const path='preview/src/layouts/templates/'+ident(t.id)+'/'+ident(v.id)+'/Component.tsx'
-  const bundle=generateBundle({roots:[v.root],pagePath:'layout:'+t.id},{layoutSlot:true,resolveCapturedIcon,resolveCapturedColor})
+  const bundle=generateBundle({roots:[v.root],pagePath:'layout:'+t.id},{layoutSlot:true,resolveCapturedIcon,resolveCapturedColor,resolveCanvasComponent})
   files[path]=bundle.tsx
   files[path.replace('Component.tsx','component.css')]=bundle.css
  }
