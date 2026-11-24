@@ -69,3 +69,13 @@ test('route paths are nested, encoded safely and resolve relative imports',()=>{
   assert.ok(!routeDirectory('/../x').includes('/../'))
   assert.equal(relativeModule('preview/src/pages/store/details/Page.tsx','preview/src/components/canvas/Action.tsx'),'../../../components/canvas/Action')
 })
+
+test('route table loads page modules lazily, preserves breakpoint choice and shared imports',()=>{
+ const f=fixture(),routes=f['preview/src/routes.ts']
+ assert.match(routes,/import \{lazy\} from "react"/)
+ assert.match(routes,/import\("\.\/pages\/store\/Page"\)/)
+ assert.match(routes,/import\("\.\/pages\/store\/details\/Page"\)/)
+ assert.doesNotMatch(routes,/import \{ variants as/)
+ assert.match(f['preview/src/pages/store/Page.tsx'],/export function RoutePage/)
+ assert.match(f['preview/src/App.tsx'],/Suspense/)
+})
