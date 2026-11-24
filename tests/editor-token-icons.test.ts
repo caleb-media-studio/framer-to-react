@@ -21,3 +21,9 @@ test('captured Flowbite stroke control selects the outline registry entry',async
  assert.equal((await resolveExactIcon('Code Branch','Flowbite',{strokeWidth:2}))?.key,'code-branch-outline')
  assert.equal(await resolveExactIcon('Code Branch','Flowbite'),null)
 })
+test('native editor icon dimensions use rendered integer pixels and intrinsic aspect ratio',async()=>{
+ const {nativeIconDimensions}=await import('../src/editor-nodes.ts')
+ assert.deepEqual(nativeIconDimensions({id:'icon',type:'IconNode',width:'14.5px',height:'auto'},'<svg viewBox="0 0 24 24"></svg>'),{width:'15px',height:'15px'})
+ assert.deepEqual(nativeIconDimensions({id:'logo',type:'IconNode',width:'24px',height:'auto'},'<svg viewBox="0 0 24 12"></svg>'),{width:'24px',height:'12px'})
+ assert.deepEqual(nativeIconDimensions({id:'logo',type:'IconNode',width:'auto',height:'12px'},'<svg viewBox="0 0 24 12"></svg>'),{width:'24px',height:'12px'})
+})

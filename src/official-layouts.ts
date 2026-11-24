@@ -5,7 +5,7 @@ export interface OfficialDocument {format:string;templates:(Omit<OfficialNode,'t
 import {generateBundle} from './generator.ts'
 import {svgMarkup,svgPath,safeSvg} from './vectors.ts'
 import {relativeModule} from './reuse.ts'
-import {sourceIcon, type IconControls} from './editor-nodes.ts'
+import {sourceIcon,nativeIconDimensions, type IconControls} from './editor-nodes.ts'
 
 const walk=(n:OfficialNode,fn:(n:OfficialNode)=>void):void=>{fn(n);for(const c of n.children||[])walk(c,fn)}
 const ident=(id:unknown)=>String(id).replace(/[^a-zA-Z0-9_-]/g,'_')
@@ -43,7 +43,7 @@ export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconC
   }else{
    if(kind==='IconNode'&&!a.svg){
     const v=await sourceIcon(n,controls)
-    if(v?.svg){a.svg=v.svg;a.vectorOrigin='editor-icon-registry';a.height=a.height==='fit-content'?a.width:a.height
+    if(v?.svg){a.svg=v.svg;a.vectorOrigin='editor-icon-registry';a.height=a.height==='fit-content'?a.width:a.height;Object.assign(a,nativeIconDimensions(n,v.svg))
       if(v.color)a.color=v.color
       issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Library icon needs rendered source verification'})
     }else issues.push({stage:'compile',severity:'warning',nodeId:n.id,message:'Unresolved icon source'})

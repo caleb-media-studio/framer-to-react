@@ -33,6 +33,22 @@ export function iconPaint(n:OfficialNode,controls:IconControls){
  }
  return {color:typeof color==='string'?color:undefined,strokeWidth:typeof strokeWidth==='number'&&Number.isFinite(strokeWidth)&&strokeWidth>=0&&strokeWidth<=24?strokeWidth:undefined}
 }
+/** Framer native icon renderer rounds pixel dimensions before intrinsic sizing.
+ * Keep the explicit editor lengths untouched in the capture; normalize only in the compiler.
+ * Auto on the other axis follows the resolved source SVG's intrinsic ratio.
+ */
+export function nativeIconDimensions(n:OfficialNode,svg:string):{width?:string;height?:string}{
+ const pixel=(v:unknown)=>typeof v==='string'&&/^\d+(?:\.\d+)?px$/.test(v)?parseFloat(v):undefined
+ const w=pixel(n.width),h=pixel(n.height)
+ const viewBox=/\bviewBox=(["'])([^"']+)\1/i.exec(svg)?.[2].trim().split(/[\s,]+/).map(Number)
+ const ratio=viewBox?.length===4&&viewBox[2]>0&&viewBox[3]>0?viewBox[2]/viewBox[3]:null
+ const out:{width?:string;height?:string}={}
+ if(w!==undefined)out.width=Math.round(w)+'px'
+ if(h!==undefined)out.height=Math.round(h)+'px'
+ if(ratio&&w!==undefined&&n.height==='auto')out.height=Math.round(Math.round(w)/ratio)+'px'
+ if(ratio&&h!==undefined&&n.width==='auto')out.width=Math.round(Math.round(h)*ratio)+'px'
+ return out
+}
 export async function sourceIcon(n:OfficialNode,controls:IconControls){
  const paint=iconPaint(n,controls)
  const match=await resolveExactIcon(n.icon,n.set,paint)
@@ -69,7 +85,7 @@ export async function createEditorNodeResolver(d:EditorNodes,controls:IconContro
    if(typeof n.width==='string'&&n.width!=='auto')a.width=n.width
    if(typeof n.height==='string'&&n.height!=='auto')a.height=n.height
    else if(typeof a.width==='string'&&/^\d+(?:\.\d+)?px$/.test(a.width))a.height=a.width
-   if(r.svg){a.svg=r.svg;a.vectorOrigin='editor-icon-registry'}
+   if(r.svg){a.svg=r.svg;a.vectorOrigin='editor-icon-registry';Object.assign(a,nativeIconDimensions(n,r.svg))}
    return {...node,kind:'IconNode',attributes:a,children:[]}
   }
   if(r.svg){
