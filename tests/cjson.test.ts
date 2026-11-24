@@ -86,7 +86,7 @@ test('captured template icons resolve without any matching page icon',async()=>{
  raw['library/layouts.json']=JSON.stringify({format:'framer-to-agent/layout-source-v1',templates:[template],bindings:[{id:'page',path:'/',layout:'layout'}],assets:{},issues:[]})
  const result=await compileCapturedArchive(await packCaptureDocuments(raw))
  const component=Object.entries(result.files).find(([k])=>k.startsWith('preview/src/layouts/templates/')&&k.endsWith('Component.tsx'))
- assert.ok(component);assert.match(asText(component[1]),/maskImage:/)
+ assert.ok(component);assert.match(asText(component[1]),/<svg /)
  const asset=Object.keys(result.files).find(k=>k.startsWith('preview/public/assets/vectors/')&&k.endsWith('.svg'))
  assert.ok(asset);assert.ok(asText(component[1]).includes(asset.replace('preview/public','')))
 })

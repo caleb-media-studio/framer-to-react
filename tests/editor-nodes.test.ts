@@ -15,7 +15,7 @@ test('typed editor nodes reconcile plugin icon instances, real vector artwork, c
  assert.deepEqual(compiled,await compileCapturedArchive(await packCaptureDocuments(raw)))
  assert.deepEqual(raw,before)
  const tsx=String(compiled.files['preview/src/pages/app/breakpoints/1200-0/Component.tsx'])
- assert.match(tsx,/maskImage:/)
+ assert.match(tsx,/<svg /)
  assert.match(tsx,/color: "#123456"/)
  assert.match(tsx,/height: "15px"/)
  assert.doesNotMatch(tsx,/Hidden overlay content/)

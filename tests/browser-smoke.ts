@@ -39,6 +39,13 @@ try{
  assert.ok(intrinsic&&bounded)
  assert.ok(intrinsic.width>100,'intrinsic source text retains natural width inside narrow clipped parent')
  assert.ok(bounded.width<=100&&bounded.height>intrinsic.height,'captured max width still causes wrapping')
+ const vector=page.locator('svg[data-f2a-node="page-0-1200-vector"]')
+ const vectorBox=await vector.boundingBox()
+ assert.ok(vectorBox&&vectorBox.width===20&&vectorBox.height===20)
+ assert.equal(await vector.locator('path').evaluate(el=>getComputedStyle(el).stroke),'rgb(18, 52, 86)')
+ assert.equal(await vector.locator('path').evaluate(el=>getComputedStyle(el).strokeWidth),'1.5px')
+ assert.equal(await vector.evaluate(el=>getComputedStyle(el).maskImage),'none')
+
 
  const input=page.locator('.exported-page input[type=email]')
  await input.fill('person@example.test')

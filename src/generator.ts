@@ -1,3 +1,4 @@
+import {nativeVector} from './native-vector.ts'
 import type {EditorRichText} from './editor-rich-text.ts'
 import type {ColorResolver} from './design-tokens.ts'
 import {validateInlineRuns} from './inline-text.ts'
@@ -421,6 +422,8 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
         const controlColor = Object.values(attrs.controls || {}).find(v => cssColor(v))
         const capturedColor=attrs.textColor || attrs.color || controlColor
         const iconColor = options.resolveCapturedColor?.(capturedColor,node,'iconColor') || cssColor(capturedColor) || 'inherit'
+        const native=nativeVector(inlineSvg)
+        if(native)return `${indent}<svg ${classAttr}${native.attributes} role="img" aria-label=${JSON.stringify(label)} data-f2a-vector-asset=${JSON.stringify(svgSource)} style={{ display: ${JSON.stringify(attrs.visible === false ? "none" : "inline-block")}, width: ${JSON.stringify(maskWidth)}, height: ${JSON.stringify(maskHeight)}, color: ${JSON.stringify(iconColor)} }}>${native.children}</svg>`
         return `${indent}<span ${classAttr} role="img" aria-label=${JSON.stringify(label)} style={{ display: ${JSON.stringify(attrs.visible === false ? "none" : "inline-block")}, width: ${JSON.stringify(maskWidth)}, height: ${JSON.stringify(maskHeight)}, color: ${JSON.stringify(iconColor)}, backgroundColor: "currentColor", maskImage: ${mask}, WebkitMaskImage: ${mask}, maskSize: "contain", WebkitMaskSize: "contain", maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", maskPosition: "center", WebkitMaskPosition: "center" }} />`
       }
       return `${indent}<img ${classAttr} src=${JSON.stringify(svgSource)} alt=${JSON.stringify(String(attrs.altText || attrs.alt || attrs.name || ''))} />`

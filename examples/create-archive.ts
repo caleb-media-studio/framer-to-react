@@ -19,10 +19,11 @@ function snapshot(path:string,index:number):Snapshot{
     text(p+'-intrinsic','Intrinsic','A label wider than its parent',16,{width:'fit-content',height:'fit-content'}),
     text(p+'-bounded','Bounded','A label wider than its parent',16,{width:'fit-content',maxWidth:'100px',height:'fit-content'})
    ]},
+   {id:p+'-vector',kind:'SVGNode',attributes:{name:'Native vector example',width:'20px',height:'20px',color:'#123456',svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12h20"/></svg>'}},
    {id:p+'-group',kind:'FrameNode',attributes:{name:'Field group',width:'100%',layout:'stack',stackDirection:'vertical',gap:'8px'},children:[text(p+'-label','Label','Email address'),{id:p+'-input',kind:'FrameNode',attributes:{name:'Input / Email',width:'100%',height:'40px',layout:'stack',stackDirection:'horizontal',stackAlignment:'center',padding:'8px',backgroundColor:'#263248',borderRadius:'6px'},children:[text(p+'-placeholder','Placeholder','name@example.test',14)]}]}
   ]}
  })
- return {roots:[{id:'page-'+index,kind:'WebPageNode',attributes:{name:path},children:breakpoints}],warnings:[],truncated:false,nodeCount:27}
+ return {roots:[{id:'page-'+index,kind:'WebPageNode',attributes:{name:path},children:breakpoints}],warnings:[],truncated:false,nodeCount:29}
 }
 for(const [i,path] of ['/','/details'].entries()){
  const item=packagePage({id:'page-'+i,path,type:'web'},snapshot(path,i),{rawOnly:true})

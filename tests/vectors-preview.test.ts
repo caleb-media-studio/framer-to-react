@@ -16,8 +16,9 @@ test('reads SVG payload from Framer SVGNode and produces an actual SVG file', as
   const rel=svgPath(icon)
   const tsx=generateBundle(snapshot).tsx
   assert.match(tsx, new RegExp(rel.replaceAll('/','\\/').replaceAll('.','\\.')))
-  assert.match(tsx, /<span/)
-  assert.match(tsx, /maskImage/)
+  assert.match(tsx, /<svg /)
+  assert.match(tsx, /stroke=\{"currentColor"\}/)
+  assert.doesNotMatch(tsx, /maskImage/)
   const refs=collectAssetReferences([snapshot])
   assert.equal(refs.inlineSvg.length,1)
   const assets=await bundleAssets(refs)
@@ -88,7 +89,7 @@ test('monochrome SVG icons inherit CSS currentColor, multicolor SVG logos keep i
   assert.match(b.tsx, /<img/)
 })
 
-test('hidden monochrome SVG masks do not override hidden display or occupy stack space', () => {
+test('hidden monochrome SVGs do not override hidden display or occupy stack space', () => {
   const hidden = structuredClone(snapshot)
   hidden.roots[0].children[0].attributes!.visible = false
   const hiddenBundle = generateBundle(hidden)
