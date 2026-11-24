@@ -27,7 +27,8 @@ function collectPreview(args: { ids: string[]; props: string[] }): Record<string
   for (const id of args.ids) {
     const el = [...document.querySelectorAll(`[data-f2a-node="${CSS.escape(id)}"]`)].find((e) => e.checkVisibility()) ?? document.querySelector(`[data-f2a-node="${CSS.escape(id)}"]`);
     if (!el) { out[id] = null; continue; }
-    const block = el.matches('h1,h2,h3,h4,h5,h6,p,li') ? el : el.querySelector('h1,h2,h3,h4,h5,h6,p,li') ?? el;
+    let block = el.matches('h1,h2,h3,h4,h5,h6,p,li') ? el : el.querySelector('h1,h2,h3,h4,h5,h6,p,li') ?? el;
+    while(block.children.length===1&&block.firstElementChild?.tagName==='SPAN'&&block.firstElementChild.textContent===block.textContent&&/^(inline|block|inline-block)$/.test(getComputedStyle(block.firstElementChild).display))block=block.firstElementChild;
     const cs = getComputedStyle(block) as unknown as Record<string, string>;
     const r = el.getBoundingClientRect();
     const style: Record<string, string> = {};

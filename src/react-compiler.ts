@@ -1,4 +1,5 @@
-import {generatePreviewFiles} from './preview.ts'
+import {expandCanvasTree} from './generator.ts'
+import {generatePreviewFiles,collectCanvasComponents} from './preview.ts'
 import {serializeReferenceVector} from './reference-vector.ts'
 import {svgPath} from './vectors.ts'
 import {buildOverlay} from './enrichment.ts'
@@ -47,6 +48,15 @@ export function compileReactArchive(rawFiles:ArchiveFiles,{evidence=[],layoutSou
  }
  for(const failure of manifest.failures||[])issues.push({stage:'capture',severity:'error',message:String(failure)})
  if((manifest.requestedPages??pages.length)>pages.length)issues.push({stage:'capture',severity:'error',message:'Requested page coverage incomplete'})
+ const canvas=collectCanvasComponents(source)
+ // Index occurrence IDs generated from library definitions as well as page-owned nodes.
+ // Existing editor nodes retain priority, including original component/vector identities.
+ for(const page of pages)for(const bp of page.breakpoints||[]){
+  const d=parse<Snapshot>(source,bp.directory+'/design.json')
+  for(const root of d.roots)walk(expandCanvasTree(root,id=>canvas.get(String(id))||null),n=>{
+   if(!editorNodes.has(n.id)){editorNodes.set(n.id,n);nodeBreakpoint.set(n.id,bp.id)}
+  })
+ }
  const validEvidence=evidence.filter(e=>routes.has(e.route)&&pages.find(p=>p.path===e.route)?.breakpoints?.some(b=>b.id===e.doc?.breakpointId&&parseFloat(String(b.width??''))===e.doc?.provenance?.viewport?.width))
  const overlay=buildOverlay(validEvidence,editorNodes,nodeBreakpoint)
  for(const n of Object.values(overlay.nodes)){

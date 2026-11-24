@@ -32,7 +32,7 @@ function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number,
     if (typeof files[source + 'design.json'] === 'string') {
       const captured = applyOverlay(JSON.parse(textFile(files,source + 'design.json')), overlay)
       const original = template ? contentWithinLayout(captured) : captured
-      const updated = generateBundle(original, { collectReusable:true, resolveCanvasComponent: identifier => canvasComponents.get(String(identifier)) || null, resolveCodeComponent(identifier) {
+      const updated = generateBundle(original, { collectReusable:true, referenceOverlay:overlay, resolveCanvasComponent: identifier => canvasComponents.get(String(identifier)) || null, resolveCodeComponent(identifier) {
         const match = findCodeComponent(identifier, codeFiles)
         return match ? { exportName: match.exportName, importPath: relativeModule(componentPath, 'preview/src/components/code/' + match.path) } : null
       } })

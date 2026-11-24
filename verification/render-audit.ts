@@ -20,7 +20,8 @@ export function collectRenderAudit(side:'source'|'candidate'):RenderAudit {
     if(side==='candidate'&&el.matches('input,textarea,select,svg,img'))continue
     const text=normalize(el.textContent||'')
     if(!text)continue
-    const block=el.matches('p,h1,h2,h3,h4,h5,h6,li')?el:el.querySelector('p,h1,h2,h3,h4,h5,h6,li')||el
+    let block=el.matches('p,h1,h2,h3,h4,h5,h6,li')?el:el.querySelector('p,h1,h2,h3,h4,h5,h6,li')||el
+    while(block.children.length===1&&block.firstElementChild?.tagName==='SPAN'&&block.firstElementChild.textContent===block.textContent&&/^(inline|block|inline-block)$/.test(getComputedStyle(block.firstElementChild).display))block=block.firstElementChild
     const css=getComputedStyle(block)
     const style:Style={}
     for(const k of ['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','textTransform','color','fontStyle','textDecorationLine'] as const)style[k]=css[k]
