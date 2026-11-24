@@ -1,3 +1,4 @@
+import type {CompressionStats} from './capture-zip.ts'
 import {captureUsedFonts,includeCapturedFonts} from './capture-fonts.ts'
 import type {ArchiveFiles,AssetRecord,Folder,PageDescriptor,PageRecord,Snapshot,SDKClient,Manifest} from './types.ts'
 import {errorMessage,textFile} from './types.ts'
@@ -48,25 +49,35 @@ function slug(s:unknown) {
   return String(s || 'framer-design').replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'framer-design'
 }
 async function writeZip(files:ArchiveFiles, name:string) {
-  setStatus('Compressing the immutable design archive in a worker...')
-  const zip=await new Promise<Uint8Array>((resolve,reject)=>{
+  setStatus('Encoding archive and benchmarking compression on the same capture...')
+  const compressed=compressedEl.checked
+  const {zip,stats}=await new Promise<{zip:Uint8Array;stats?:CompressionStats}>((resolve,reject)=>{
     const worker=new Worker(new URL('./archive-worker.ts',import.meta.url),{type:'module'})
-    worker.onmessage=({data}:MessageEvent<{ok:boolean;zip?:Uint8Array;error?:string}>)=>{
+    worker.onmessage=({data}:MessageEvent<{ok:boolean;zip?:Uint8Array;stats?:CompressionStats;error?:string}>)=>{
       worker.terminate()
-      if(data.ok&&data.zip)resolve(data.zip);else reject(Error(data.error||'Archive encoding failed'))
+      if(data.ok&&data.zip)resolve({zip:data.zip,stats:data.stats});else reject(Error(data.error||'Archive encoding failed'))
     }
     worker.onerror=e=>{worker.terminate();reject(Error(e.message||'Archive worker failed'))}
-    worker.postMessage({files,compressed:compressedEl.checked})
+    worker.postMessage({files,compressed})
   })
   const blob = new Blob([new Uint8Array(zip)], {type:'application/zip'})
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = name
+  a.download = compressed ? name.slice(0,-4)+'-cjson.zip' : name
   document.body.appendChild(a)
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 20000)
+  const size=(n:number)=>(n/1_000_000).toFixed(2)+' MB'
+  const result=$('compression-result')
+  result.hidden=false
+  if(stats){
+    const saved=100*(1-stats.cjsonZipBytes/stats.plainZipBytes)
+    result.textContent='Same capture: JSON ZIP '+size(stats.plainZipBytes)+' → CJSON ZIP '+size(stats.cjsonZipBytes)+' ('+(saved>=0?saved.toFixed(1)+'% smaller':(-saved).toFixed(1)+'% larger')+'). '+(stats.elapsedMs/1000).toFixed(1)+'s encoding and benchmark.'
+    return 'Downloaded CJSON ZIP. '
+  }
+  result.textContent='Plain JSON ZIP: '+size(zip.byteLength)
   return 'Downloaded ZIP. '
 }
 
@@ -260,7 +271,7 @@ async function exportFolder(path:string, explicitPages:PageDescriptor[]|null = n
       catch(e){manifest.warnings.push(method+' unavailable: '+errorMessage(e))}
     }
     for (const [i,page] of list.entries()) {
-      setStatus(`Reading ${i + 1}/${list.length}: ${page.path}...`)
+      setStatus(`Hydrating and reading ${i + 1}/${list.length}: ${page.path} (canvas may jump)...`)
       // Yield so the plugin UI gets a chance to render progress for larger exports.
       await new Promise(resolve => setTimeout(resolve, 0))
       try {
@@ -302,8 +313,8 @@ async function exportFolder(path:string, explicitPages:PageDescriptor[]|null = n
     files['diagnostics.json'] = JSON.stringify(report, null, 2)
     files['diagnostics.md'] = diagnosticsMarkdown(report)
     files['manifest.json'] = JSON.stringify(manifest, null, 2)
-    files['AGENT.md'] = '# Raw Framer design archive\\n\\nCompile the immutable ZIP with the standalone React compiler. The capture contains no generated React.\\n'
-    files['README.md'] = '# Framer design archive v6\\n\\nContains source JSON (or design.cjson and design.cjsonref), original code and assets. See diagnostics.md for any unavailable source fields. Compile the ZIP with framer-to-react compile.\\n'
+    files['AGENT.md'] = '# Raw Framer design archive\n\nCompile the immutable ZIP with the standalone React compiler. The capture contains no generated React.\n'
+    files['README.md'] = '# Framer design archive v6\n\nContains source JSON (or design.cjson and design.cjsonref), original code and assets. See diagnostics.md for any unavailable source fields. Compile the ZIP with framer-to-react compile.\n'
     const saved = await writeZip(files, `framer-${slug(path === '/' ? 'entire-project' : path)}-${rawOnly?'design':'react'}.zip`)
     lastHandoff = textFile(files,'AGENT.md')
     copyBtn.disabled = false
@@ -347,7 +358,7 @@ async function exportSelection() {
       'diagnostics.md':diagnosticsMarkdown(report),
       'manifest.json':JSON.stringify({format:'framer-to-agent/selection-export-v6',captureAdapter:'framer-public-plugin-api',captureOnly:rawOnly,pages:[{path:'/',directory:'',breakpoints:[]}],nodeCount:snapshot.nodeCount,library:library.summary,assets:{referenced:assets.manifest.length,bundled:assets.manifest.filter(x=>x.bundled).length},diagnostics:report.summary,limitations:library.limitations},null,2),
     }
-    selectionFiles['README.md'] = '# Raw design selection\\n\\nCompile this immutable archive independently.\\n'
+    selectionFiles['README.md'] = '# Raw design selection\n\nCompile this immutable archive independently.\n'
     const saved = await writeZip(selectionFiles, `framer-${slug(bundle.componentName)}.zip`)
     copyBtn.disabled = false
     setStatus(saved + `Exported ${snapshot.nodeCount} layers and ${assets.manifest.filter(x=>x.bundled).length} bundled assets. ${report.summary.errors} errors, ${report.summary.warnings} warnings.`)

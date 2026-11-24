@@ -1,3 +1,5 @@
+import {encodeCaptureZip} from '../src/capture-zip.ts'
+import {unzipSync,strFromU8} from 'fflate'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {packCaptureDocuments,unpackCaptureDocuments,CJSON_DATA,CJSON_REF} from '../src/cjson.ts'
@@ -74,4 +76,29 @@ test('stale legacy reference vector cannot suppress a captured icon identity',as
  const stale={...raw,'design.json':JSON.stringify(d)}
  assert.deepEqual(await compileCapturedArchive(stale),expected)
  assert.deepEqual(await compileCapturedArchive(await packCaptureDocuments(stale)),expected)
+})
+
+test('captured template icons resolve without any matching page icon',async()=>{
+ const raw=make()
+ const m=JSON.parse(asText(raw['manifest.json']));m.pages[0].id='page'
+ raw['manifest.json']=JSON.stringify(m)
+ const template={id:'layout',name:'Layout',variants:[{id:'wide',width:1200,root:{id:'layout-root',kind:'FrameNode',attributes:{width:'1200px',height:'fit-content'},children:[{id:'layout-icon',kind:'IconNode',attributes:{icon:'arrow-right',set:'Lucide',width:'24px',height:'24px'}},{id:'slot',kind:'PlaceholderNode'}]}}]}
+ raw['library/layouts.json']=JSON.stringify({format:'framer-to-agent/layout-source-v1',templates:[template],bindings:[{id:'page',path:'/',layout:'layout'}],assets:{},issues:[]})
+ const result=await compileCapturedArchive(await packCaptureDocuments(raw))
+ const component=Object.entries(result.files).find(([k])=>k.startsWith('preview/src/layouts/templates/')&&k.endsWith('Component.tsx'))
+ assert.ok(component);assert.match(asText(component[1]),/maskImage:/)
+ const asset=Object.keys(result.files).find(k=>k.startsWith('preview/public/assets/vectors/')&&k.endsWith('.svg'))
+ assert.ok(asset);assert.ok(asText(component[1]).includes(asset.replace('preview/public','')))
+})
+test('same-capture ZIP benchmark measures actual delivered bytes and preserves assets',async()=>{
+ const raw=make(),before=structuredClone(raw)
+ const plain=await encodeCaptureZip(raw,false),encoded=await encodeCaptureZip(raw,true)
+ assert.equal(encoded.stats?.plainZipBytes,plain.zip.byteLength)
+ assert.equal(encoded.stats?.cjsonZipBytes,encoded.zip.byteLength)
+ const zipped=unzipSync(encoded.zip)
+ assert.ok(zipped[CJSON_DATA]);assert.ok(zipped[CJSON_REF])
+ assert.deepEqual(zipped['assets/example.png'],raw['assets/example.png'])
+ const decoded=await unpackCaptureDocuments(Object.fromEntries(Object.entries(zipped).map(([k,v])=>[k,k==='assets/example.png'?v:strFromU8(v)])))
+ assert.deepEqual(JSON.parse(asText(decoded['manifest.json'])),JSON.parse(asText(raw['manifest.json'])))
+ assert.deepEqual(raw,before)
 })

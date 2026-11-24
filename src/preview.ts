@@ -73,7 +73,7 @@ export function collectCanvasComponents(files:ArchiveFiles) {
 
 export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null,resolveCapturedIcon}:PreviewOptions={}) {
   const files:ArchiveFiles = {}
-  const layouts=layoutModules(layoutSource,pages)
+  const layouts=layoutModules(layoutSource,pages,resolveCapturedIcon)
   Object.assign(files,layouts.files)
   if(layoutSource)files['preview/layout-report.json']=JSON.stringify({assignedRoutes:layouts.assignments.size,issues:layouts.issues},null,2)
   const codeFiles = collectCodeFiles(sourceFiles)
