@@ -22,6 +22,7 @@ export function parseEditorSource(value:unknown,manifest:Manifest):EditorSource{
  const ids=new Set(d.templates.map(t=>t.id))
  if(ids.size!==d.templates.length||d.pages.some(p=>p.layout&&!ids.has(p.layout)))throw Error('Incomplete editor layout capture')
  const scopes=new Set(d.scope.pages)
+ if(scopes.size!==d.scope.pages.length)throw Error("Duplicate editor text capture scope")
  for(const id of scopes)if(!bindings.has(id))throw Error('Unknown editor capture scope')
  const seen=new Set<string>()
  for(const t of d.text){
@@ -38,10 +39,20 @@ const styleFields=['fontSize','fontWeight','fontStyle','fontName','lineHeight','
 export function createEditorTextResolver(d:EditorSource,nodeResolver?:import('./editor-nodes.ts').EditorNodeResolver){
  const nodes=new Map(d.text.map(t=>[JSON.stringify([t.$scopeId,t.$groundNodeId,t.id]),t]))
  const applied=new Set<string>(),conflicts=new Set<string>(),complex=new Set<string>()
+ const observed=new Map<string,{pageId:string;breakpointId:string;nodeId:string;missing:string[];matched:boolean}>()
  const resolve=(snapshot:Snapshot,pageId:string):Snapshot=>{
   const visit=(node:DesignNode,bp:string):DesignNode=>{
    const key=JSON.stringify([pageId,bp,node.id]),t=nodes.get(key)
    let current=nodeResolver?.resolve(node,pageId,bp)??node
+   if(node.kind==='TextNode'||node.kind==='RichTextNode'){
+    const a=node.attributes??{}, inline=a.inlineTextStyle??{}
+    const missing:string[]=[]
+    if(!t?.fontSize&&!inline.fontSize&&!a.fontSize)missing.push('fontSize')
+    if(!t?.textColor&&!inline.color&&!inline.textColor&&!a.textColor&&!a.color)missing.push('textColor')
+    if(!t?.fontName&&!a.font?.family&&!inline.font?.family&&!a.fontFamily)missing.push('fontFamily')
+    if(t?.fontWeight==null&&a.font?.weight==null&&a.fontWeight==null&&inline.fontWeight==null)missing.push('fontWeight')
+    observed.set(key,{pageId,breakpointId:bp,nodeId:node.id,missing,matched:!!t})
+   }
    if(t&&(node.kind==='TextNode'||node.kind==='RichTextNode')){
     if(node.text!==t.text&&String(node.text??'').replace(/\n/g,'')!==t.text.replace(/\n/g,''))conflicts.add(key)
     else{
@@ -62,6 +73,6 @@ export function createEditorTextResolver(d:EditorSource,nodeResolver?:import('./
   }
   return {...snapshot,roots:snapshot.roots.map(r=>visit(r,r.id))}
  }
- return {resolve,report:()=>({captured:nodes.size,applied:applied.size,unmatched:[...nodes.keys()].filter(k=>!applied.has(k)&&!conflicts.has(k)),conflicts:[...conflicts],complexRuns:[...complex],scope:d.scope,...(nodeResolver?{nodes:nodeResolver.report()}:{})})}
+ return {resolve,report:()=>({captured:nodes.size,applied:applied.size,unmatched:[...nodes.keys()].filter(k=>!applied.has(k)&&!conflicts.has(k)),conflicts:[...conflicts],complexRuns:[...complex],scope:d.scope,coverage:[...observed.values()],nodeScope:nodeResolver?.scope??[],...(nodeResolver?{nodes:nodeResolver.report()}:{})})}
 }
 

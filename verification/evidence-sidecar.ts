@@ -1,3 +1,4 @@
+import {readProjectEditorCapture,EDITOR_PROJECT} from '../src/project-editor-capture.ts';
 // Opt-in evidence sidecar: measures the *published* site (not the editor) at the four QA widths and attaches its computed
 // text styles and bounding boxes to archive TextNodes that match reliably (schema/evidence-match.ts). Output is evidence
 // with provenance and confidence, kept separate from the export; it never fills a field for an unmatched node.
@@ -134,12 +135,20 @@ async function main(): Promise<void> {
   }
   const canvas=collectCanvasComponents(library)
   const manifest=JSON.parse(readFileSync(join(exportDir,'manifest.json'),'utf8')) as Manifest
-  const editorPath=join(exportDir,EDITOR_SOURCE)
-  const editor=existsSync(editorPath)?parseEditorSource(JSON.parse(readFileSync(editorPath,'utf8')),manifest):null
-  const controlsPath=join(exportDir,EDITOR_ICON_CONTROLS)
-  const controls:IconControls=existsSync(controlsPath)?JSON.parse(readFileSync(controlsPath,'utf8')):{}
-  const nodePath=join(exportDir,EDITOR_NODES)
-  const editorNodes=editor&&existsSync(nodePath)?await createEditorNodeResolver(parseEditorNodes(JSON.parse(readFileSync(nodePath,'utf8')),editor,manifest),controls):undefined
+  // Use exactly the same original-source adapter as the compiler.
+  const sourceFiles:ArchiveFiles={}
+  for(const key of [EDITOR_SOURCE,EDITOR_NODES,EDITOR_ICON_CONTROLS,EDITOR_PROJECT]){
+    const file=join(exportDir,key);if(existsSync(file))sourceFiles[key]=readFileSync(file,'utf8')
+  }
+  if(typeof sourceFiles[EDITOR_PROJECT]==='string'){
+    const index=JSON.parse(sourceFiles[EDITOR_PROJECT] as string)
+    for(const entry of index.pages??[]){
+      if(typeof entry.id!=='string'||!/^[A-Za-z0-9_-]+$/.test(entry.id)||entry.file!=='library/editor-pages/'+entry.id+'.json')throw Error('Invalid project source member')
+      sourceFiles[entry.file]=readFileSync(join(exportDir,entry.file),'utf8')
+    }
+  }
+  const {source:editor,nodes,controls}=readProjectEditorCapture(sourceFiles,manifest)
+  const editorNodes=nodes?await createEditorNodeResolver(nodes,controls):undefined
   const textResolver=editor?createEditorTextResolver(editor,editorNodes):undefined
   const layouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'},controls):null
   const spliceContent=(node:DesignNode,content:DesignNode):DesignNode=>node.kind==='PlaceholderNode'?content:{...node,children:(node.children??[]).map(n=>spliceContent(n,content))}

@@ -6,17 +6,21 @@ import {safeSvg,svgPath} from './vectors.ts'
 export const EDITOR_NODES='library/editor-nodes.json'
 export const EDITOR_ICON_CONTROLS='library/editor-icon-controls.json'
 export type IconControls=Record<string,{controls?:Record<string,{type?:string;name?:string;defaultValue?:unknown}>}>
-export interface EditorNodes {format:'framer-to-agent/editor-node-capture-v1';projectId:string;branch:string;pageId:string;nodes:OfficialNode[]}
+export interface EditorNodes {format:'framer-to-agent/editor-node-capture-v1'|'framer-to-agent/editor-node-capture-v2';projectId:string;branch:string;pageId?:string;pageIds?:string[];nodes:OfficialNode[]}
 const supported=new Set(['FrameNode','IconNode','SVGNode','ShapeContainerNode','RelativeOverlayNode','FixedOverlayNode'])
 const identity=(p:string,b:string,id:string)=>JSON.stringify([p,b,id])
 export function parseEditorNodes(value:unknown,source:EditorSource,manifest:Manifest):EditorNodes{
  const d=value as EditorNodes
- if(!d||d.format!=='framer-to-agent/editor-node-capture-v1'||d.projectId!==source.projectId||d.branch!==source.branch||!Array.isArray(d.nodes)||!source.scope.pages.includes(d.pageId))throw Error('Invalid or unrelated editor node capture')
- const page=manifest.pages?.find(p=>p.id===d.pageId),seen=new Set<string>()
- if(!page)throw Error('Editor node page missing')
+ if(!d||!['framer-to-agent/editor-node-capture-v1','framer-to-agent/editor-node-capture-v2'].includes(d.format)||d.projectId!==source.projectId||d.branch!==source.branch||!Array.isArray(d.nodes))throw Error('Invalid or unrelated editor node capture')
+ const ids=d.format==='framer-to-agent/editor-node-capture-v1'?[d.pageId]:d.pageIds
+ if(!Array.isArray(ids)||!ids.length||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!source.scope.pages.includes(id)))throw Error('Invalid editor node capture scope')
+ const pages=new Map((manifest.pages??[]).filter(p=>ids.includes(p.id)).map(p=>[p.id,p]))
+ if(pages.size!==ids.length)throw Error('Editor node page missing')
+ const seen=new Set<string>()
  for(const n of d.nodes){
-  if(!supported.has(n.type)||typeof n.id!=='string'||n.$scopeId!==d.pageId||!page.breakpoints?.some(b=>b.id===n.$groundNodeId)||n.$truncated)throw Error('Editor node identity mismatch')
-  const key=identity(d.pageId,n.$groundNodeId,n.id)
+  const page=pages.get(n.$scopeId)
+  if(!supported.has(n.type)||typeof n.id!=='string'||!page||!page.breakpoints?.some(b=>b.id===n.$groundNodeId)||n.$truncated)throw Error('Editor node identity mismatch')
+  const key=identity(n.$scopeId,n.$groundNodeId,n.id)
   if(seen.has(key))throw Error('Duplicate editor node identity')
   seen.add(key)
  }
@@ -60,7 +64,7 @@ export async function createEditorNodeResolver(d:EditorNodes,controls:IconContro
  const rows=new Map<string,{node:OfficialNode;svg?:string;color?:string}>()
  const assets:ArchiveFiles={},applied=new Set<string>(),conflicts=new Set<string>(),unresolvedIcons=new Set<string>(),overlays=new Set<string>()
  for(const n of d.nodes){
-  const k=identity(d.pageId,n.$groundNodeId,n.id)
+  const k=identity(n.$scopeId,n.$groundNodeId,n.id)
   const row:{node:OfficialNode;svg?:string;color?:string}={node:n}
   if(n.type==='IconNode'){
    const icon=await sourceIcon(n,controls)
@@ -109,7 +113,7 @@ export async function createEditorNodeResolver(d:EditorNodes,controls:IconContro
   }
   return {...node,kind:n.type,attributes:a}
  }
- return {resolve,assets,report:()=>({captured:rows.size,applied:applied.size,conflicts:[...conflicts],unmatched:[...rows.keys()].filter(k=>!applied.has(k)&&!conflicts.has(k)),closedOverlays:[...overlays],unresolvedIcons:[...unresolvedIcons]})}
+ return {resolve,assets,scope:d.format==='framer-to-agent/editor-node-capture-v1'?[d.pageId!]:d.pageIds!,report:()=>({captured:rows.size,applied:applied.size,conflicts:[...conflicts],unmatched:[...rows.keys()].filter(k=>!applied.has(k)&&!conflicts.has(k)),closedOverlays:[...overlays],unresolvedIcons:[...unresolvedIcons]})}
 }
 
 export type EditorNodeResolver=Awaited<ReturnType<typeof createEditorNodeResolver>>
