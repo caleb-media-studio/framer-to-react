@@ -1,5 +1,6 @@
 import type {DesignNode,Snapshot,Overlay,OverlayRow,OverlayConflict,Evidence,ReferenceDocument,TextEvidence} from './types.ts'
 import {serializeReferenceVector} from './reference-vector.ts'
+import {validateInlineRuns} from './inline-text.ts'
 /**
  * Opt-in reference enrichment. Published-site computed styles (collected outside Framer, see scripts/enrich-export.ts)
  * are matched to captured layers by route, breakpoint and layer id. Only `high` confidence matches are applied, only
@@ -86,14 +87,15 @@ export function buildOverlay(evidenceDocs:Evidence[], editorNodes = new Map<stri
       // Consensus proves the style, not which live element is this node, so per-element content is not restored.
       if (byConsensus && restored !== null) restored = null
       const tag = e.style?.blocks === '1' && /^(h[1-6]|p)$/.test(e.style?.tag || '') ? e.style.tag! : null;
-      if (!Object.keys(textStyle).length && restored === null && tag === null) continue
+      const inlineRuns = !byConsensus && !editor?.richTextHTML && !editor?.attributes?.inlineTextStyle && e.style?.blocks==='1' ? validateInlineRuns(e.inlineRuns, restored ?? original) : null
+      if (!Object.keys(textStyle).length && restored === null && tag === null && !inlineRuns) continue
       // Node ids are per breakpoint frame; if one ever shows up under two widths, neither value is trusted.
       if (rejected.has(e.nodeId)) continue
       if (nodes[e.nodeId]) { rejected.add(e.nodeId); conflicts.push({route, width, nodeId: e.nodeId, field: '*', editor: null, reference: 'duplicate evidence for node', kept: 'none'}); const prev = owner.get(e.nodeId)!; prev.row.applied--; prev.row.appliedFields -= prev.fields; if (prev.consensus) prev.row.consensus = (prev.row.consensus ?? 1)-1; delete nodes[e.nodeId]; continue }
-      const fieldCount = Object.keys(textStyle).length + Number(restored !== null) + Number(tag !== null);
+      const fieldCount = Object.keys(textStyle).length + Number(restored !== null) + Number(tag !== null) + Number(inlineRuns !== null);
       row.applied++; row.appliedFields += fieldCount; if (byConsensus) row.consensus = (row.consensus ?? 0)+1
       owner.set(e.nodeId, {row, fields: fieldCount, consensus: byConsensus})
-      nodes[e.nodeId] = {textStyle, ...(restored === null ? {} : {hardBreakText:restored}), ...(tag === null ? {} : {tag}), provenance: {source: 'published-site', url: doc.provenance?.url, viewport: doc.provenance?.viewport,
+      nodes[e.nodeId] = {textStyle, ...(inlineRuns ? {inlineRuns} : {}), ...(restored === null ? {} : {hardBreakText:restored}), ...(tag === null ? {} : {tag}), provenance: {source: 'published-site', url: doc.provenance?.url, viewport: doc.provenance?.viewport,
         capturedAt: doc.provenance?.capturedAt, responseSha256: doc.provenance?.responseSha256,
         breakpointId: doc.breakpointId ?? null, confidence: e.confidence, method: byConsensus ? `${e.method}+style-consensus` : e.method, framerName: e.framerName, domPath: e.domPath}}
     }

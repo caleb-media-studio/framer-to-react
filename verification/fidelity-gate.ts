@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 
 import { chromium, type Browser } from '@playwright/test';
 
+import {collectRenderAudit,compareRenderAudit,type RenderAudit} from './render-audit.ts';
 import { compareBox, compareStyle, pixelVerdict, gatePassed, TOL, type Box, type FieldMismatch, type Style } from './fidelity-compare.ts';
 
 const WIDTHS = [390, 810, 1200, 1920] as const;
@@ -54,7 +55,7 @@ async function diffPngs(args: { a: string; b: string; channel: number }): Promis
   return { differing, total: w * h, heights: [ia.height, ib.height] };
 }
 
-async function shoot(browser: Browser, url: string, width: number, file: string): Promise<{ buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; error?: string }> {
+async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; error?: string }> {
   const page = await browser.newPage({ viewport: { width, height: VIEWPORT_HEIGHT }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
   try {
     const res = await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
@@ -62,8 +63,9 @@ async function shoot(browser: Browser, url: string, width: number, file: string)
     await page.waitForTimeout(SETTLE_MS);
     const responseSha256=res?.ok()?createHash('sha256').update(await res.body()).digest('hex'):undefined;
     const docH = await page.evaluate(() => document.documentElement.scrollHeight);
+    const audit = await page.evaluate(collectRenderAudit,side);
     const buf = await page.screenshot({ path: file, fullPage: true });
-    return { buf, docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
+    return { audit,buf, docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
   } finally { await page.close(); }
 }
 
@@ -81,7 +83,7 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
   const liveShotFile = join(outDir, 'shots', `${stem}.live.png`);
   const previewUrl = new URL(route, prev);
   previewUrl.searchParams.set('fidelity', '1');
-  const [l, p] = await Promise.all([shoot(browser, new URL(route, live).href, width, liveShotFile), shoot(browser, previewUrl.href, width, join(outDir, 'shots', `${stem}.prev.png`))]);
+  const [l, p] = await Promise.all([shoot(browser, new URL(route, live).href, width, liveShotFile,'source'), shoot(browser, previewUrl.href, width, join(outDir, 'shots', `${stem}.prev.png`),'candidate')]);
   if (l.error) unverified.push(`live ${l.error}`);
   if (p.error) mismatches.push({ nodeId: '(page)', name: 'preview load', fields: [{ field: 'http', expected: 200, actual: p.error }] });
 
@@ -108,10 +110,16 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
     result.layersChecked = high.length;
   }
 
-  if(l.error||p.error||new URL(l.finalUrl).pathname!==new URL(route,live).pathname){
+  if(l.error||p.error||new URL(l.finalUrl).pathname!==new URL(route,live).pathname||new URL(p.finalUrl).pathname!==previewUrl.pathname){
     unverified.push('screenshot comparison unavailable: source or preview load/route failure');
     return {...result,docH:[l.docH,p.docH],mismatchLayers:mismatches.length,unverifiedCount:unverified.length,mismatches,unverified};
   }
+  // Pass 2 independently checks rendered text/paint against a fresh source render.
+  result.sourceLayerMismatchCount=mismatches.length;
+  const audit=compareRenderAudit(l.audit,p.audit);
+  result.renderAudit=audit;
+  result.renderAuditMismatchCount=audit.findings.length;
+  mismatches.push(...audit.findings);
   const blank = await browser.newPage();
   const d = await blank.evaluate(diffPngs, { a: l.buf.toString('base64'), b: p.buf.toString('base64'), channel: TOL.pixelChannel });
   await blank.close();

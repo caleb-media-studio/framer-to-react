@@ -1,3 +1,4 @@
+import {collectRenderAudit,compareRenderAudit} from '../verification/render-audit.ts'
 import assert from 'node:assert/strict'
 import {chromium} from '@playwright/test'
 import {createServer} from 'node:http'
@@ -44,6 +45,24 @@ try{
  await page.goto(url+'/details?fidelity=1')
  await page.getByText('Details page',{exact:true}).waitFor()
  assert.equal(errors.length,0,errors.join('\n'))
+ // Browser-level regression: a matching overall text layout does not excuse a missing
+ // thin line, a wrong font weight/color, or a hidden/transparent separator.
+ const auditPage=await browser.newPage({viewport:{width:390,height:900}})
+ const surface='<style>body{margin:0;font:600 10px/12px Arial;color:rgb(145,152,161)}p{margin:0}.rule{width:300px;height:1px;background:rgb(51,51,51)}.hidden{visibility:hidden}</style>'
+ await auditPage.setContent(surface+'<div data-framer-component-type="RichTextContainer" data-framer-name="Label"><p>Schedule decision</p></div><div class="rule" data-framer-name="Separator"></div><div class="rule hidden" data-framer-name="Hidden"></div>')
+ const source=await auditPage.evaluate(collectRenderAudit,'source' as const)
+ assert.equal(source.texts.length,1);assert.equal(source.lines.length,1)
+ await auditPage.setContent(surface+'<p data-f2a-node="label">Schedule decision</p><div class="rule" data-f2a-node="rule"></div>')
+ const matching=await auditPage.evaluate(collectRenderAudit,'candidate' as const)
+ assert.deepEqual(compareRenderAudit(source,matching).findings,[])
+ await auditPage.locator('[data-f2a-node="rule"]').evaluate(el=>el.remove())
+ await auditPage.locator('[data-f2a-node="label"]').evaluate(el=>{(el as HTMLElement).style.fontWeight='400';(el as HTMLElement).style.color='white'})
+ const broken=compareRenderAudit(source,await auditPage.evaluate(collectRenderAudit,'candidate' as const))
+ assert.equal(broken.lineMatched,0);assert.equal(broken.textMatched,0)
+ assert.ok(broken.findings.some(f=>f.fields.some(x=>x.field==='divider.presence')))
+ assert.ok(broken.findings.some(f=>f.fields.some(x=>x.field==='fontWeight')))
+ assert.ok(broken.findings.some(f=>f.fields.some(x=>x.field==='color')))
+ await auditPage.close()
  console.log('Browser smoke passed: lazy routes, original named TSX component and controls, editable field, history, responsive variant, direct URL.')
 }finally{await browser.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}
 

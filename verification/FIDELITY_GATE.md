@@ -19,6 +19,24 @@ reducedMotion reduce.
 | letterSpacing | ±0.05px (`normal` ≡ 0px) |
 | bbox x, y, width, height (page coordinates) | ±2px |
 
+## Independent rendered-surface pass
+
+The second pass collects fresh computed styles and page-coordinate boxes directly from both screenshot
+pages, without using archive-to-DOM identity matches or cached source properties. It compares each
+normalized visible text-content group as a multiset (every occurrence requires a distinct matching
+occurrence), including font style and text decoration in addition to the original text checks. Residual
+pairings are diagnostic only; no automatic source identity or style overrides are inferred from proximity.
+
+Thin painted horizontal/vertical elements (up to 3px thick, at least 8px long, and at least 4:1 aspect
+ratio) are checked independently of text. Matching requires color equality, effective opacity within
+0.001, thickness within 0.1px, and the existing 2px box tolerance. Missing and extra lines fail even when
+all text matches. Thin border-only frames and HR elements are included. Larger frames, gradients,
+arbitrary pseudo-element layouts and SVG strokes are not fully covered by this audit.
+
+The report retains the original source-ID check and screenshot verdict plus a separate renderAudit
+object with counts and findings; overlapping findings from the two passes are intentionally retained
+and are not a count of unique physical layers.
+
 ## Per route × width
 
 | Check | Tolerance |
@@ -42,3 +60,4 @@ Gate passes only with 0 mismatches and 0 unverified across every manifest route 
 2026-11-24: fail closed via process exit status and explicit passed field, including empty/incomplete runs. No tolerance changes.
 
 2026-11-24: candidate URL adds fidelity=1 to disable only the generated preview's own tools launcher. Exported page content, layout, and pixel tolerances remain unchanged.
+\n2026-11-24: added an independent live-render text and thin-divider pass, with distinct-occurrence matching and stricter thickness verification. Existing tolerances unchanged.\n
