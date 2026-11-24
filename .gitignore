@@ -10,3 +10,5 @@ playwright-report/
 test-results/
 .local/
 private-fixtures/
+
+node_modules

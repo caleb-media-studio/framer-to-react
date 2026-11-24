@@ -33,20 +33,20 @@ bun run dev
 Framer के प्लगइन डेवलपमेंट वातावरण में स्थानीय प्लगइन खोलें। **Raw design archive only** चालू रखकर डिज़ाइन ZIP डाउनलोड करें।
 
 ```sh
-bun bin/framer-to-react.mjs compile design.zip --out react-app
+bun bin/framer-to-react.ts compile design.zip --out react-app
 cd react-app
 bun install
 bun run build
 bun run dev
 ```
 
-npm के लिए टूल की डायरेक्टरी में `npm ci` और `node bin/framer-to-react.mjs compile design.zip --out react-app` चलाएँ। फिर बने ऐप में `npm install`, `npm run build` और `npm run dev` चलाएँ।
+npm के लिए टूल की डायरेक्टरी में `npm ci` और `node bin/framer-to-react.ts compile design.zip --out react-app` चलाएँ। फिर बने ऐप में `npm install`, `npm run build` और `npm run dev` चलाएँ।
 
 आउटपुट में `src/components/`, `src/layouts/`, `src/pages/` और `public/assets/` शामिल हैं। मूल TSX को वास्तविक React घटक के रूप में आयात किया जाता है। इनपुट आर्काइव नहीं बदला जाता।
 
 ## सत्यापन और सीमाएँ
 
-सफल बिल्ड का अर्थ पूरी दृश्य समानता नहीं है। अनुपलब्ध एसेट, असमर्थित इंटरैक्शन और अस्पष्ट संदर्भ रिपोर्ट में दर्ज होते हैं। `compile-report.json` देखें। केवल अधिकृत प्रोजेक्ट का उपयोग करें। कम्पाइलर और CLI strict TypeScript में हैं; कुछ रेंडरिंग मॉड्यूल अभी JavaScript में हैं।
+सफल बिल्ड का अर्थ पूरी दृश्य समानता नहीं है। अनुपलब्ध एसेट, असमर्थित इंटरैक्शन और अस्पष्ट संदर्भ रिपोर्ट में दर्ज होते हैं। `compile-report.json` देखें। केवल अधिकृत प्रोजेक्ट का उपयोग करें। प्लगइन, कम्पाइलर, रेंडरिंग, सत्यापन और परीक्षण सहित सभी प्रथम-पक्ष एक्जीक्यूटेबल कोड strict TypeScript में हैं।
 
 [आर्काइव विनिर्देश](../archive-v5.md) · [सत्यापन](../../verification/FIDELITY_GATE.md) · [योगदान](../../CONTRIBUTING.md) · [MIT लाइसेंस](../../LICENSE)।
 

@@ -5,7 +5,7 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "noEmit": true,
-    "allowJs": true,
+    "allowJs": false,
     "checkJs": false,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
@@ -16,11 +16,17 @@
       "ES2022",
       "DOM",
       "DOM.Iterable"
-    ]
+    ],
+    "resolveJsonModule": true,
+    "erasableSyntaxOnly": true
   },
   "include": [
-    "src/react-compiler.ts",
-    "scripts/cli.ts",
-    "verification/*.ts"
+    "src/**/*.ts",
+    "scripts/*.ts",
+    "bin/*.ts",
+    "verification/*.ts",
+    "tests/*.ts",
+    "examples/*.ts",
+    "vite.config.ts"
   ]
 }

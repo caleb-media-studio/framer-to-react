@@ -1,28 +1,14 @@
-import {generatePreviewFiles} from './preview.mjs'
-import {serializeReferenceVector} from './reference-vector.mjs'
-import {svgPath} from './vectors.mjs'
-import {buildOverlay} from './enrichment.mjs'
+import {generatePreviewFiles} from './preview.ts'
+import {serializeReferenceVector} from './reference-vector.ts'
+import {svgPath} from './vectors.ts'
+import {buildOverlay} from './enrichment.ts'
 
-export type ArchiveFiles = Record<string, string | Uint8Array>
-export interface DesignNode { id: string; kind: string; attributes?: Record<string,unknown>; children?: DesignNode[]; text?: string }
-export interface Snapshot { roots: DesignNode[]; truncated?: boolean }
-export interface Breakpoint { id: string; directory: string; width?: string; name?: string; primary?: boolean }
-export interface PageRecord { id?: string; path: string; directory: string; breakpoints?: Breakpoint[]; truncated?: boolean }
-export interface Manifest { format: string; pages?: PageRecord[]; projectName?: string; requestedPages?: number; failures?: unknown[] }
-export interface Issue {stage: string; severity: string; message?: string; route?: string; code?: string; count?: number}
-export interface ReferenceDocument {breakpointId?: string; provenance?: {viewport?: {width?:number}}; [key:string]:unknown}
-export interface Evidence {route:string; doc:ReferenceDocument; file?:string}
-export interface LayoutSource {format:string; templates:unknown[]; bindings:unknown[]; assets:ArchiveFiles; issues:unknown[]}
-export interface CompileOptions {evidence?:Evidence[]; layoutSource?:LayoutSource|null}
-interface CaptureDiagnostics {summary?:Record<string,number>; groups?:Issue[]}
-interface AssetRecord {url?:string; path?:string; bundled?:boolean}
+import type {ArchiveFiles,DesignNode,Snapshot,Manifest,Issue,Evidence,LayoutSource,CaptureDiagnostics} from './types.ts'
+export type {ArchiveFiles,DesignNode,Snapshot,Breakpoint,PageRecord,Manifest,Issue,ReferenceDocument,Evidence,LayoutSource} from './types.ts'
+export interface CompileOptions {evidence?:Evidence[];layoutSource?:LayoutSource|null}
+interface AssetRecord {url?:string;path?:string;bundled?:boolean}
 interface AssetManifest {assets?:AssetRecord[]}
-interface Overlay {nodes:Record<string,{vector?:unknown}>; coverage:unknown[]}
-interface GeneratedPackage {scripts:Record<string,string>; [key:string]:unknown}
-// Legacy rendering adapters are independently covered by regression tests.
-// The archive-facing compiler and CLI are strict TypeScript.
-const render = generatePreviewFiles as unknown as (pages:PageRecord[],files:ArchiveFiles,options:{title:string;diagnostics:CaptureDiagnostics|null;layoutSource:LayoutSource|null})=>ArchiveFiles
-const overlayFor = buildOverlay as unknown as (evidence:Evidence[],nodes:Map<string,DesignNode>,breakpoints:Map<string,string>)=>Overlay
+interface GeneratedPackage {scripts:Record<string,string>;[key:string]:unknown}
 
 const safePath = (p:unknown):p is string => typeof p==='string' && p.length<=2048 && !p.startsWith('/') && !p.includes('\\') && p.split('/').every(s=>s && s!=='.' && s!=='..' && !/[\x00-\x1f]/.test(s))
 const prefix = (dir:string) => dir ? dir+'/' : ''
@@ -61,8 +47,8 @@ export function compileReactArchive(rawFiles:ArchiveFiles,{evidence=[],layoutSou
  }
  for(const failure of manifest.failures||[])issues.push({stage:'capture',severity:'error',message:String(failure)})
  if((manifest.requestedPages??pages.length)>pages.length)issues.push({stage:'capture',severity:'error',message:'Requested page coverage incomplete'})
- const validEvidence=evidence.filter(e=>routes.has(e.route)&&pages.find(p=>p.path===e.route)?.breakpoints?.some(b=>b.id===e.doc?.breakpointId&&parseFloat(b.width??'')===e.doc?.provenance?.viewport?.width))
- const overlay=overlayFor(validEvidence,editorNodes,nodeBreakpoint)
+ const validEvidence=evidence.filter(e=>routes.has(e.route)&&pages.find(p=>p.path===e.route)?.breakpoints?.some(b=>b.id===e.doc?.breakpointId&&parseFloat(String(b.width??''))===e.doc?.provenance?.viewport?.width))
+ const overlay=buildOverlay(validEvidence,editorNodes,nodeBreakpoint)
  for(const n of Object.values(overlay.nodes)){
   const svg=serializeReferenceVector(n.vector);if(svg)source[svgPath(svg)]=svg
  }
@@ -72,7 +58,7 @@ export function compileReactArchive(rawFiles:ArchiveFiles,{evidence=[],layoutSou
  for(const group of diagnostics?.groups||[]){
   if(['error','warning','review'].includes(group.severity))issues.push({stage:'capture',severity:group.severity,code:group.code,message:group.message,count:group.count})
  }
- const files=render(pages,source,{title:manifest.projectName||'Framer export',diagnostics,layoutSource})
+ const files=generatePreviewFiles(pages,source,{title:manifest.projectName||'Framer export',diagnostics,layoutSource})
  let assets:AssetRecord[]=[];try{assets=parse<AssetManifest>(source,'assets/manifest.json').assets||[]}catch{issues.push({stage:'capture',severity:'warning',message:'Asset manifest missing'})}
  const mappings:[string,string][]=[]
  for(const a of assets){
@@ -91,9 +77,9 @@ export function compileReactArchive(rawFiles:ArchiveFiles,{evidence=[],layoutSou
  const report={format:'framer-to-agent/compile-report-v1',routes:pages.length,snapshots,expectedVariants:variants,emittedVariants:emitted,captureIssues:issues,captureDiagnostics,captureStatus:issues.some(i=>i.severity==='error')?'incomplete':issues.length?'limitations-reported':'no-known-structural-errors',appliedReferenceNodes:Object.keys(overlay.nodes).length,referenceCoverage:overlay.coverage,skippedEvidence:evidence.length-validEvidence.length,build:{status:'not-run'},fidelity:{status:'unverified',reason:'A separate browser comparison against the authorized source is required.'}}
  const pkg=parse<GeneratedPackage>(files,'preview/package.json')
  pkg.scripts['build:react']=pkg.scripts.build
- pkg.scripts.build='node scripts/build-react.mjs'
+ pkg.scripts.build='node scripts/build-react.ts'
  files['preview/package.json']=JSON.stringify(pkg,null,2)
- files['preview/scripts/build-react.mjs']=`import fs from 'node:fs'
+ files['preview/scripts/build-react.ts']=`import fs from 'node:fs'
 import {spawnSync} from 'node:child_process'
 const p=new URL('../compile-report.json',import.meta.url)
 const report=JSON.parse(fs.readFileSync(p,'utf8'))

@@ -50,7 +50,7 @@ Use the local development URL in Framer's plugin development workflow. In the pl
 Compile the downloaded archive independently:
 
 ```sh
-bun bin/framer-to-react.mjs compile ./design.zip --out ./react-app
+bun bin/framer-to-react.ts compile ./design.zip --out ./react-app
 cd react-app
 bun install
 bun run dev
@@ -60,7 +60,7 @@ To check the production build, run `bun run build` in the generated application.
 
 ```sh
 npm ci
-node bin/framer-to-react.mjs compile ./design.zip --out ./react-app
+node bin/framer-to-react.ts compile ./design.zip --out ./react-app
 cd react-app
 npm install
 npm run build
@@ -122,7 +122,7 @@ bun run test
 bun run build
 ```
 
-The archive-facing compiler and CLI use strict TypeScript. Lower-level renderer adapters are currently JavaScript ES modules with regression coverage, undergoing incremental migration. Node and npm remain supported. CI uses synthetic fixtures rather than private customer projects.
+All first-party executable source, including the plugin, compiler, renderer adapters, CLI, verification tools, examples and tests, uses strict TypeScript. Icon datasets remain JSON; captured third-party code is preserved unchanged. Node and npm remain supported. CI uses synthetic fixtures rather than private customer projects.
 
 ## License
 

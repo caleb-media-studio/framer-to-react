@@ -33,20 +33,20 @@ bun run dev
 افتح الإضافة المحلية في بيئة تطوير إضافات Framer. اترك خيار **Raw design archive only** مفعّلًا ونزّل ملف ZIP.
 
 ```sh
-bun bin/framer-to-react.mjs compile design.zip --out react-app
+bun bin/framer-to-react.ts compile design.zip --out react-app
 cd react-app
 bun install
 bun run build
 bun run dev
 ```
 
-عند استخدام npm، شغّل `npm ci` و`node bin/framer-to-react.mjs compile design.zip --out react-app` في مستودع الأداة. ثم شغّل `npm install` و`npm run build` و`npm run dev` في التطبيق الناتج.
+عند استخدام npm، شغّل `npm ci` و`node bin/framer-to-react.ts compile design.zip --out react-app` في مستودع الأداة. ثم شغّل `npm install` و`npm run build` و`npm run dev` في التطبيق الناتج.
 
 تتضمن المخرجات `src/components/` و`src/layouts/` و`src/pages/` و`public/assets/`. تُستورد ملفات TSX الأصلية كمكونات فعلية بدل تحويلها إلى صور. ولا يُعدّل المترجم أرشيف الإدخال.
 
 ## الدقة والقيود
 
-نجاح البناء لا يعني التطابق البصري الكامل. تُسجّل الأصول غير المتاحة والتفاعلات غير المدعومة والمراجع غير المؤكدة ضمن القيود. راجع `compile-report.json` وتقارير إعادة الاستخدام. استخدم فقط المشاريع التي تملك إذن الوصول إليها. واجهة المترجم وسطر الأوامر مكتوبان باستخدام TypeScript الصارم، ولا تزال بعض وحدات التصيير مكتوبة باستخدام JavaScript.
+نجاح البناء لا يعني التطابق البصري الكامل. تُسجّل الأصول غير المتاحة والتفاعلات غير المدعومة والمراجع غير المؤكدة ضمن القيود. راجع `compile-report.json` وتقارير إعادة الاستخدام. استخدم فقط المشاريع التي تملك إذن الوصول إليها. تستخدم جميع الشيفرات التنفيذية للمشروع، بما فيها الإضافة والمترجم وأدوات التحقق والاختبارات، TypeScript الصارم.
 
 [مواصفات الأرشيف](../archive-v5.md) · [التحقق](../../verification/FIDELITY_GATE.md) · [المساهمة](../../CONTRIBUTING.md) · [ترخيص MIT](../../LICENSE).
 
