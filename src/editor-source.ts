@@ -35,13 +35,13 @@ export function parseEditorSource(value:unknown,manifest:Manifest):EditorSource{
  return d
 }
 const styleFields=['fontSize','fontWeight','fontStyle','fontName','lineHeight','letterSpacing','textColor','textAlign','textAlignment','textTransform','textDecoration','tag'] as const
-export function createEditorTextResolver(d:EditorSource){
+export function createEditorTextResolver(d:EditorSource,nodeResolver?:import('./editor-nodes.ts').EditorNodeResolver){
  const nodes=new Map(d.text.map(t=>[JSON.stringify([t.$scopeId,t.$groundNodeId,t.id]),t]))
  const applied=new Set<string>(),conflicts=new Set<string>(),complex=new Set<string>()
  const resolve=(snapshot:Snapshot,pageId:string):Snapshot=>{
   const visit=(node:DesignNode,bp:string):DesignNode=>{
    const key=JSON.stringify([pageId,bp,node.id]),t=nodes.get(key)
-   let current=node
+   let current=nodeResolver?.resolve(node,pageId,bp)??node
    if(t&&(node.kind==='TextNode'||node.kind==='RichTextNode')){
     if(node.text!==t.text&&String(node.text??'').replace(/\n/g,'')!==t.text.replace(/\n/g,''))conflicts.add(key)
     else{
@@ -62,6 +62,6 @@ export function createEditorTextResolver(d:EditorSource){
   }
   return {...snapshot,roots:snapshot.roots.map(r=>visit(r,r.id))}
  }
- return {resolve,report:()=>({captured:nodes.size,applied:applied.size,unmatched:[...nodes.keys()].filter(k=>!applied.has(k)&&!conflicts.has(k)),conflicts:[...conflicts],complexRuns:[...complex],scope:d.scope})}
+ return {resolve,report:()=>({captured:nodes.size,applied:applied.size,unmatched:[...nodes.keys()].filter(k=>!applied.has(k)&&!conflicts.has(k)),conflicts:[...conflicts],complexRuns:[...complex],scope:d.scope,...(nodeResolver?{nodes:nodeResolver.report()}:{})})}
 }
 

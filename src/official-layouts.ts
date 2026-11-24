@@ -5,7 +5,7 @@ export interface OfficialDocument {format:string;templates:(Omit<OfficialNode,'t
 import {generateBundle} from './generator.ts'
 import {svgMarkup,svgPath,safeSvg} from './vectors.ts'
 import {relativeModule} from './reuse.ts'
-import {resolveExactIcon} from './icon-resolver.ts'
+import {sourceIcon, type IconControls} from './editor-nodes.ts'
 
 const walk=(n:OfficialNode,fn:(n:OfficialNode)=>void):void=>{fn(n);for(const c of n.children||[])walk(c,fn)}
 const ident=(id:unknown)=>String(id).replace(/[^a-zA-Z0-9_-]/g,'_')
@@ -14,7 +14,7 @@ const copied=['name','visible','position','top','right','bottom','left','centerX
 
 // This is an additional authorized source format, not a mutation of the raw plugin export.
 // Exact page IDs and template IDs are mandatory. No route-name or product-specific rules.
-export async function prepareOfficialLayouts(doc:OfficialDocument):Promise<LayoutSource>{
+export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconControls={}):Promise<LayoutSource>{
  if(doc?.format!=='framer-to-agent/official-layout-tree-v1'||!Array.isArray(doc.templates)||!Array.isArray(doc.pages))throw Error('Invalid official layout source')
  const assets:ArchiveFiles={},templates:LayoutTemplate[]=[],issues:Issue[]=[]
  async function convert(n:OfficialNode):Promise<DesignNode>{
@@ -41,9 +41,9 @@ export async function prepareOfficialLayouts(doc:OfficialDocument):Promise<Layou
    a.visible=false;issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Source overlay interaction not yet implemented'})
   }else{
    if(kind==='IconNode'&&!a.svg){
-    const v=await resolveExactIcon(n.icon,n.set)
-    if(v?.svg){a.svg=v.svg;a.vectorOrigin=v.source;a.height=a.height==='fit-content'?a.width:a.height
-      const paint=Object.entries(n).filter(([k,v])=>k.startsWith('$control__')&&typeof v==='string'&&/^#[0-9a-f]{3,8}$/i.test(v));if(paint.length===1)a.color=paint[0][1]
+    const v=await sourceIcon(n,controls)
+    if(v?.svg){a.svg=v.svg;a.vectorOrigin='editor-icon-registry';a.height=a.height==='fit-content'?a.width:a.height
+      if(v.color)a.color=v.color
       issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Library icon needs rendered source verification'})
     }else issues.push({stage:'compile',severity:'warning',nodeId:n.id,message:'Unresolved icon source'})
    }

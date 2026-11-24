@@ -143,7 +143,7 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, reso
   put('background-color', color(a.backgroundColor,'backgroundColor'))
   // Only when Framer's public text API omits colors: inherit readable text
   // from the nearest solid surface instead of browser-default black on black.
-  const hex = /^#([0-9a-f]{6})$/i.exec(String(a.backgroundColor || ''))
+  const hex = /^#([0-9a-f]{6})$/i.exec(String(typeof a.backgroundColor==='object'?a.backgroundColor?.light:a.backgroundColor || ''))
   if (hex) {
     const rgb=[0,2,4].map(i=>parseInt(hex[1].slice(i,i+2),16)/255)
     const light=rgb.map(x=>x<=0.04045?x/12.92:((x+0.055)/1.055)**2.4)
@@ -272,7 +272,7 @@ export function inFlowRoot(root:DesignNode) {
  // This is semantic inference, not a claim that the original has functional form behavior.
 export function nativeField(node:DesignNode, parent:DesignNode|null|undefined):NativeField|null {
   const a=node?.attributes || {}, name=String(a.name||'')
-  if(node?.kind!=='FrameNode'||a.visible===false||a.link||a.layout!=='stack'||!/(^|[ /·_-])input([ /·_-]|$)/i.test(name))return null
+  if(node?.kind!=='FrameNode'||a.editorKind==='FrameNode'||a.visible===false||a.link||a.layout!=='stack'||!/(^|[ /·_-])input([ /·_-]|$)/i.test(name))return null
   const visible=(node.children||[]).filter(c=>c.attributes?.visible!==false)
   const text=visible.filter((c):c is DesignNode & {text:string}=>c.kind==='TextNode'&&typeof c.text==='string'&&!!c.text.trim()&&!c.attributes?.link)
   if(text.length!==1||visible.some(c=>c!==text[0]&&(!['ComponentInstanceNode','SVGNode','IconNode'].includes(c.kind)||!/(^|[ /·_-])icon([ /·_-]|$)/i.test(c.attributes?.name||'')||c.children?.length)))return null

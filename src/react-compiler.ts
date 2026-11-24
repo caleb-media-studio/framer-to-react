@@ -1,3 +1,4 @@
+import {EDITOR_NODES,EDITOR_ICON_CONTROLS,parseEditorNodes,createEditorNodeResolver,type IconControls} from './editor-nodes.ts'
 import {EDITOR_SOURCE,parseEditorSource,createEditorTextResolver} from './editor-source.ts'
 import {prepareOfficialLayouts} from './official-layouts.ts'
 import {generatePreviewFiles,capturedNode} from './preview.ts'
@@ -30,7 +31,7 @@ export function compileReactArchive(rawFiles:Readonly<ArchiveFiles>,...unsupport
  return compileDecoded(rawFiles,new Map())
 }
 const iconIdentity=(n:DesignNode)=>JSON.stringify([n.attributes?.icon??null,n.attributes?.set??n.attributes?.iconSetId??n.attributes?.iconSet??null])
-function compileDecoded(rawFiles:Readonly<ArchiveFiles>,icons:Map<string,string>,editor?:{layouts:LayoutSource;text:ReturnType<typeof createEditorTextResolver>}){
+function compileDecoded(rawFiles:Readonly<ArchiveFiles>,icons:Map<string,string>,editor?:{layouts:LayoutSource;text:ReturnType<typeof createEditorTextResolver>;assets?:ArchiveFiles}){
  const manifest=parse<Manifest>(rawFiles,'manifest.json')
  if(!/^framer-to-agent\/(folder|selection)-export-v[1-9]\d*$/.test(manifest.format||''))throw Error('Unsupported capture archive format')
  const pages=manifest.pages || (manifest.format.includes('selection')?[{path:'/',directory:'',breakpoints:[]}]:[])
@@ -70,6 +71,7 @@ function compileDecoded(rawFiles:Readonly<ArchiveFiles>,icons:Map<string,string>
  // evidence or supplemental file can alter this source-only compiler invocation.
  if(!source['library/layouts.json']&&!editor)issues.push({stage:'capture',severity:'review',message:'No captured layout-template library; inherited layout completeness is unverified'})
  for(const svg of icons.values())source[svgPath(svg)]=svg
+ Object.assign(source,editor?.assets??{})
  const files=generatePreviewFiles(pages,source,{title:manifest.projectName||'Framer export',diagnostics,layoutSource:editor?.layouts??parseCapturedLayouts(source),editorText:editor?.text,resolveCapturedIcon:n=>icons.get(iconIdentity(n))||null})
  let assets:AssetRecord[]=[];try{assets=parse<AssetManifest>(source,'assets/manifest.json').assets||[]}catch{issues.push({stage:'capture',severity:'warning',message:'Asset manifest missing'})}
  const mappings:[string,string][]=[]
@@ -122,7 +124,11 @@ export async function compileCapturedArchive(files:Readonly<ArchiveFiles>){
  }
  const editorValue=decoded[EDITOR_SOURCE]
  const editor=typeof editorValue==='string'?parseEditorSource(JSON.parse(editorValue),parse<Manifest>(decoded,'manifest.json')):null
- const editorLayouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'}):null
+ const controls:IconControls=typeof decoded[EDITOR_ICON_CONTROLS]==='string'?JSON.parse(decoded[EDITOR_ICON_CONTROLS] as string):{}
+ const nodeValue=decoded[EDITOR_NODES]
+ if(nodeValue!==undefined&&!editor)throw Error('Editor nodes require matching editor capture')
+ const editorNodes=editor&&typeof nodeValue==='string'?await createEditorNodeResolver(parseEditorNodes(JSON.parse(nodeValue),editor,parse<Manifest>(decoded,'manifest.json')),controls):undefined
+ const editorLayouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'},controls):null
  const layouts=editorLayouts??parseCapturedLayouts(decoded)
  for(const template of layouts?.templates??[])for(const variant of template.variants)visit(variant.root)
  const icons=new Map<string,string>()
@@ -131,5 +137,5 @@ export async function compileCapturedArchive(files:Readonly<ArchiveFiles>){
   const match=await resolveExactIcon(a.icon,a.set??a.iconSetId??a.iconSet)
   if(match?.svg)icons.set(key,safeSvg(match.svg))
  }
- return compileDecoded(decoded,icons,editor&&editorLayouts?{layouts:editorLayouts,text:createEditorTextResolver(editor)}:undefined)
+ return compileDecoded(decoded,icons,editor&&editorLayouts?{layouts:editorLayouts,text:createEditorTextResolver(editor,editorNodes),assets:editorNodes?.assets}:undefined)
 }
