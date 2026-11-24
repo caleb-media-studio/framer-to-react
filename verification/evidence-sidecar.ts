@@ -11,7 +11,10 @@ import { chromium } from '@playwright/test';
 
 import {expandCanvasTree} from '../src/generator.ts';
 import {collectCanvasComponents} from '../src/preview.ts';
-import type {ArchiveFiles,DesignNode} from '../src/types.ts';
+import type {ArchiveFiles,DesignNode,Manifest} from '../src/types.ts';
+import {EDITOR_SOURCE,parseEditorSource,createEditorTextResolver} from '../src/editor-source.ts';
+import {EDITOR_NODES,EDITOR_ICON_CONTROLS,parseEditorNodes,createEditorNodeResolver,type IconControls} from '../src/editor-nodes.ts';
+import {prepareOfficialLayouts,selectLayoutVariant} from '../src/official-layouts.ts';
 import { archiveTexts, breakpointForWidth, matchTexts, type LiveText } from './evidence-match.ts';
 
 const WIDTHS = [390, 810, 1200, 1920] as const;
@@ -130,6 +133,17 @@ async function main(): Promise<void> {
     }
   }
   const canvas=collectCanvasComponents(library)
+  const manifest=JSON.parse(readFileSync(join(exportDir,'manifest.json'),'utf8')) as Manifest
+  const editorPath=join(exportDir,EDITOR_SOURCE)
+  const editor=existsSync(editorPath)?parseEditorSource(JSON.parse(readFileSync(editorPath,'utf8')),manifest):null
+  const controlsPath=join(exportDir,EDITOR_ICON_CONTROLS)
+  const controls:IconControls=existsSync(controlsPath)?JSON.parse(readFileSync(controlsPath,'utf8')):{}
+  const nodePath=join(exportDir,EDITOR_NODES)
+  const editorNodes=editor&&existsSync(nodePath)?await createEditorNodeResolver(parseEditorNodes(JSON.parse(readFileSync(nodePath,'utf8')),editor,manifest),controls):undefined
+  const textResolver=editor?createEditorTextResolver(editor,editorNodes):undefined
+  const layouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'},controls):null
+  const spliceContent=(node:DesignNode,content:DesignNode):DesignNode=>node.kind==='PlaceholderNode'?content:{...node,children:(node.children??[]).map(n=>spliceContent(n,content))}
+
   const routes = !process.argv.includes('--routes') ? ['/'] : routesArg === 'all' ? designs.map((d) => d.pagePath) : routesArg.split(',');
   mkdirSync(outDir, { recursive: true });
 
@@ -154,7 +168,12 @@ async function main(): Promise<void> {
         const live = (await page.evaluate(collectLive, STYLE_PROPS)).map((l, index) => ({ ...l, index }));
         const userAgent = await page.evaluate(() => navigator.userAgent);
 
-        const archive = frame ? archiveTexts(expandCanvasTree(frame as DesignNode,id=>canvas.get(String(id))||null)) : [];
+        const record=manifest.pages?.find(p=>p.path===route)
+        const typed=frame?textResolver?.resolve({roots:[frame as DesignNode]},record?.id??'').roots[0]??frame as DesignNode:null
+        const binding=layouts?.bindings.find(p=>p.id===record?.id&&p.path===route)
+        const template=layouts?.templates.find(t=>t.id===binding?.layout)
+        const combined=typed&&template?spliceContent(selectLayoutVariant(template,width).root,typed):typed
+        const archive = combined ? archiveTexts(expandCanvasTree(combined,id=>canvas.get(String(id))||null)) : [];
         const result = frame ? matchTexts(archive, live) : { matches: [], unmatchedArchive: [], unmatchedLive: live.map((l) => l.index) };
         const evidence = result.matches.map((m) => {
           const l = live[m.liveIndex];

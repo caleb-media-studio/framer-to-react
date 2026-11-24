@@ -40,7 +40,7 @@ export function collectPreview(args: { ids: string[]; props: string[] }): Record
 }
 
 // Runs in a blank page: decodes both PNGs and counts pixels whose max channel delta exceeds the threshold.
-async function diffPngs(args: { a: string; b: string; channel: number }): Promise<{ differing: number; total: number; heights: [number, number] }> {
+async function diffPngs(args: { a: string; b: string; channel: number }): Promise<{ differing: number; total: number; heights: [number, number]; exactDiffering:number }> {
   const load = async (b64: string): Promise<ImageBitmap> => createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
   const [ia, ib] = await Promise.all([load(args.a), load(args.b)]);
   const w = Math.max(ia.width, ib.width), h = Math.max(ia.height, ib.height);
@@ -50,11 +50,12 @@ async function diffPngs(args: { a: string; b: string; channel: number }): Promis
     return ctx.getImageData(0, 0, w, h).data;
   };
   const pa = pixels(ia), pb = pixels(ib);
-  let differing = 0;
+  let differing = 0, exactDiffering = 0;
   for (let i = 0; i < pa.length; i += 4) {
+    if(pa[i]!==pb[i]||pa[i+1]!==pb[i+1]||pa[i+2]!==pb[i+2]||pa[i+3]!==pb[i+3])exactDiffering++;
     if (Math.abs(pa[i] - pb[i]) > args.channel || Math.abs(pa[i + 1] - pb[i + 1]) > args.channel || Math.abs(pa[i + 2] - pb[i + 2]) > args.channel) differing++;
   }
-  return { differing, total: w * h, heights: [ia.height, ib.height] };
+  return { differing, exactDiffering, total: w * h, heights: [ia.height, ib.height] };
 }
 
 async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; error?: string }> {
@@ -128,6 +129,10 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
   const v = pixelVerdict(d.differing, d.total, [l.docH, p.docH]);
   result.docH = [l.docH, p.docH];
   result.pixelRatio = Math.round(v.ratio * 1e5) / 1e5;
+  result.pixelDiffering=d.differing;
+  result.pixelExactDiffering=d.exactDiffering;
+  result.pixelTotal=d.total;
+  result.pixelExactRatio=d.exactDiffering/d.total;
   if (!v.pass) mismatches.push({ nodeId: '(page)', name: 'full-page screenshot', fields: [{ field: 'pixels', expected: `≤${TOL.pixelRatio}`, actual: result.pixelRatio as number }, { field: 'docH', expected: l.docH, actual: p.docH }] });
   return { ...result, mismatchLayers: mismatches.length, unverifiedCount: unverified.length, mismatches, unverified };
 }
@@ -170,10 +175,12 @@ async function main(): Promise<void> {
   };
   try { await Promise.all(Array.from({ length: Number(flag('--workers') ?? 3) }, worker)); } finally { await browser.close(); }
   results.sort((a, b) => String(a.route).localeCompare(String(b.route)) || Number(a.width) - Number(b.width));
+  const strictPixels=process.argv.includes('--strict-pixels');
+  const exactPixelCases=results.filter(r=>r.pixelExactDiffering===0).length;
   const totals = { cases: results.length, passing: results.filter((r) => r.mismatchLayers === 0 && r.unverifiedCount === 0).length, mismatchLayers: results.reduce((s, r) => s + Number(r.mismatchLayers), 0), unverified: results.reduce((s, r) => s + Number(r.unverifiedCount), 0) };
   const captureComplete=!!manifest && !manifest.failures?.length && (manifest.requestedPages??manifest.pages.length)===manifest.pages.length;
-  const passed = gatePassed(totals, cases.length) && (!fullScope||captureComplete);
-  writeFileSync(join(outDir, 'gate.json'), JSON.stringify({ passed, scope:fullScope?'full-project':'selected-routes', captureComplete, expectedCases: cases.length, tolerances: TOL, totals, results }, null, 2));
+  const passed = gatePassed(totals, cases.length) && (!fullScope||captureComplete) && (!strictPixels||exactPixelCases===cases.length);
+  writeFileSync(join(outDir, 'gate.json'), JSON.stringify({ passed, strictPixels, exactPixelCases, scope:fullScope?'full-project':'selected-routes', captureComplete, expectedCases: cases.length, tolerances: TOL, totals, results }, null, 2));
   console.log(JSON.stringify({ passed, totals }));
   if (!passed) process.exitCode = 1;
 }

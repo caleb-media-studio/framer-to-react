@@ -62,7 +62,7 @@ export function breakpointForWidth(root: ArchiveNode, width: number): ArchiveNod
 export function archiveTexts(frame: ArchiveNode): ArchiveText[] {
   const out: ArchiveText[] = [];
   function walk(node: ArchiveNode, ancestors: string[], siblings: ArchiveNode[] = []): void {
-    if (node.attributes?.visible === false) return;
+    if (node.attributes?.visible === false || /^(Relative|Fixed)OverlayNode$/.test(node.kind)) return;
     const name = node.attributes?.name ?? '';
     if (node.kind === 'TextNode' && node.text) {
       const siblingText = siblings.filter(s => s !== node && s.attributes?.visible !== false && s.kind === 'TextNode' && s.text?.trim())
