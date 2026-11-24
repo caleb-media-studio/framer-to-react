@@ -1,3 +1,4 @@
+import type {ColorResolver} from './design-tokens.ts'
 import type {DesignNode,Snapshot,Attributes,ArchiveFiles,LayoutSource,LayoutTemplate,LayoutVariant,LayoutBinding,PageRecord,Issue} from './types.ts'
 export interface OfficialNode {id:string;type:string;children?:OfficialNode[];[key:string]:any}
 export interface OfficialDocument {format:string;templates:(Omit<OfficialNode,'type'> & {type?:string;id:string;children?:OfficialNode[]})[];pages:LayoutBinding[]}
@@ -69,7 +70,7 @@ export async function prepareOfficialLayouts(doc:OfficialDocument):Promise<Layou
  return {format:'framer-to-agent/layout-source-v1',bindings:doc.pages,templates,assets,issues}
 }
 
-export function layoutModules(source:LayoutSource|null,pages:PageRecord[],resolveCapturedIcon?:(node:DesignNode)=>string|null){
+export function layoutModules(source:LayoutSource|null,pages:PageRecord[],resolveCapturedIcon?:(node:DesignNode)=>string|null,resolveCapturedColor?:ColorResolver){
  const files:ArchiveFiles={},assignments=new Map<string,LayoutTemplate>(),issues=[...(source?.issues||[])]
  if(!source)return {files,assignments,issues}
  if(source.format!=='framer-to-agent/layout-source-v1')throw Error('Unsupported normalized layout source')
@@ -84,7 +85,7 @@ export function layoutModules(source:LayoutSource|null,pages:PageRecord[],resolv
  }
  for(const t of new Set(assignments.values()))for(const v of t.variants){
   const path='preview/src/layouts/templates/'+ident(t.id)+'/'+ident(v.id)+'/Component.tsx'
-  const bundle=generateBundle({roots:[v.root],pagePath:'layout:'+t.id},{layoutSlot:true,resolveCapturedIcon})
+  const bundle=generateBundle({roots:[v.root],pagePath:'layout:'+t.id},{layoutSlot:true,resolveCapturedIcon,resolveCapturedColor})
   files[path]=bundle.tsx
   files[path.replace('Component.tsx','component.css')]=bundle.css
  }

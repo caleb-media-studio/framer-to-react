@@ -1,3 +1,4 @@
+import type {ColorResolver} from './design-tokens.ts'
 import {validateInlineRuns} from './inline-text.ts'
 import type {Attributes,DesignNode,Snapshot,Axis,CSSProperties,RenderOptions,CodeImport,ReusableBlock,NativeField} from './types.ts'
 import {svgMarkup, svgPath, inheritsIconColor} from './vectors.ts'
@@ -19,7 +20,7 @@ function cssLen(v: any):string|null {
   return null
 }
 function cssColor(value: any):string|null {
-  const v = typeof value === 'string' ? value : value?.color ?? value?.value
+  const v = typeof value === 'string' ? value : value?.light ?? value?.color ?? value?.value ?? value?.dark
   if (typeof v !== 'string') return null
   const s = v.trim()
   if (/^var\(--[A-Za-z0-9_-]+\)$/.test(s)) return s
@@ -86,8 +87,9 @@ function stackAxis(node:DesignNode|null|undefined):Axis {
   const d = String(a.stackDirection || 'vertical').toLowerCase()
   return d === 'horizontal' || d === 'row' ? 'row' : 'column'
 }
-function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
+function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, resolveCapturedColor?:ColorResolver) {
   const a = node.attributes || {}
+  const color=(v:unknown,field:string)=>resolveCapturedColor?.(v,node,field)??cssColor(v)
   const s:CSSProperties = {}
   const tw:string[] = []
   const put = (k:string,v:string|null|undefined) => { if (v != null && v !== '') s[k] = v }
@@ -138,7 +140,7 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
   }
   put('gap', pad(a.gap))
   put('padding', pad(a.padding))
-  put('background-color', cssColor(a.backgroundColor))
+  put('background-color', color(a.backgroundColor,'backgroundColor'))
   // Only when Framer's public text API omits colors: inherit readable text
   // from the nearest solid surface instead of browser-default black on black.
   const hex = /^#([0-9a-f]{6})$/i.exec(String(a.backgroundColor || ''))
@@ -154,7 +156,7 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
   put('border-radius', pad(a.borderRadius))
   if (a.border && typeof a.border === 'object') {
     const bw = cssLen(a.border.width)
-    const color = cssColor(a.border.color)
+    const color = resolveCapturedColor?.(a.border.color,node,'border.color')??cssColor(a.border.color)
     if (bw && color) put('border', `${bw} ${/^(solid|dashed|dotted|double)$/.test(a.border.style) ? a.border.style : 'solid'} ${color}`)
   } else if (typeof a.border === 'string' && /^\d/.test(a.border)) put('border', a.border)
   if (typeof a.opacity === 'number' && a.opacity >= 0 && a.opacity < 1) put('opacity', String(a.opacity))
@@ -194,7 +196,7 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
     put('line-height', cssLen(ts.lineHeight ?? a.lineHeight ?? ref.lineHeight))
     put('letter-spacing', cssLen(ts.letterSpacing ?? a.letterSpacing ?? ref.letterSpacing))
     // Framer TextStyle colors may be ColorStyle objects ({light, dark}).
-    put('color', cssColor(ts.color?.light || ts.color || ts.textColor || a.textColor || a.color || ref.color))
+    put('color', color(ts.color || ts.textColor || a.textColor || a.color || ref.color,'textColor'))
     const transform = ts.transform || ref.textTransform
     if (/^(uppercase|lowercase|capitalize)$/.test(transform)) put('text-transform', transform)
     const textAlign = ts.alignment || ts.textAlign || a.textAlignment || a.textAlign || ref.textAlign
@@ -325,7 +327,7 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     const cls = `f2a-${namespace}-${id}`
     const attrs = node.attributes || {}
     if(options.layoutSlot && node.kind==='PlaceholderNode')return '  '.repeat(depth)+'{children}'
-    const {tw, css: localCss} = asCSS(node, unhydrated, parentAxis)
+    const {tw, css: localCss} = asCSS(node, unhydrated, parentAxis, options.resolveCapturedColor)
     // Framer frame borders are painted over the frame, not included in its layout box.
     // Preserve child padding and stack geometry while matching the visible border.
     const edgeBorders:CSSProperties={}
@@ -378,7 +380,8 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
         const maskWidth = /^(\d+(?:\.\d+)?)(?:px|rem|em)$/.test(String(attrs.width)) ? attrs.width : '24px'
         const maskHeight = /^(\d+(?:\.\d+)?)(?:px|rem|em)$/.test(String(attrs.height)) ? attrs.height : maskWidth
         const controlColor = Object.values(attrs.controls || {}).find(v => cssColor(v))
-        const iconColor = cssColor(attrs.textColor || attrs.color || controlColor) || 'inherit'
+        const capturedColor=attrs.textColor || attrs.color || controlColor
+        const iconColor = options.resolveCapturedColor?.(capturedColor,node,'iconColor') || cssColor(capturedColor) || 'inherit'
         return `${indent}<span ${classAttr} role="img" aria-label=${JSON.stringify(label)} style={{ display: ${JSON.stringify(attrs.visible === false ? "none" : "inline-block")}, width: ${JSON.stringify(maskWidth)}, height: ${JSON.stringify(maskHeight)}, color: ${JSON.stringify(iconColor)}, backgroundColor: "currentColor", maskImage: ${mask}, WebkitMaskImage: ${mask}, maskSize: "contain", WebkitMaskSize: "contain", maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", maskPosition: "center", WebkitMaskPosition: "center" }} />`
       }
       return `${indent}<img ${classAttr} src=${JSON.stringify(svgSource)} alt=${JSON.stringify(String(attrs.altText || attrs.alt || attrs.name || ''))} />`

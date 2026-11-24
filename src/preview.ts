@@ -1,3 +1,4 @@
+import {createDesignTokens,type ColorResolver} from './design-tokens.ts'
 import type {ArchiveFiles,PageRecord,DesignNode,Snapshot,LayoutTemplate,LayoutSource,CaptureDiagnostics,CodeFile,ReusableBlock,ReusableVariant,JsonObject} from './types.ts'
 import {textFile} from './types.ts'
 interface PageVariant {label:string;primary:boolean;width:string|number|null;componentPath:string;layoutPath:string|null}
@@ -16,7 +17,7 @@ export function capturedNode(node:DesignNode):DesignNode {
 }
 function capturedSnapshot(snapshot:Snapshot):Snapshot{return {...snapshot,roots:snapshot.roots.map(capturedNode)}}
 
-function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number, codeFiles:CodeFile[] = [], canvasComponents = new Map<string,DesignNode>(), template:LayoutTemplate|null = null, resolveCapturedIcon?: (node:DesignNode)=>string|null) {
+function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number, codeFiles:CodeFile[] = [], canvasComponents = new Map<string,DesignNode>(), template:LayoutTemplate|null = null, resolveCapturedIcon?: (node:DesignNode)=>string|null, resolveCapturedColor?:ColorResolver) {
   // Page-level snapshots contain every breakpoint canvas: never render these together.
   const bps = (page.breakpoints || []).filter(bp => bp.directory)
   const targets = bps.length ? [...bps].sort((a,b)=>Number(Boolean(b.primary))-Number(Boolean(a.primary)))
@@ -37,7 +38,7 @@ function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number,
     if (typeof files[source + 'design.json'] === 'string') {
       const captured = capturedSnapshot(JSON.parse(textFile(files,source + 'design.json')) as Snapshot)
       const original = template ? contentWithinLayout(captured) : captured
-      const updated = generateBundle(original, { collectReusable:true, resolveCapturedIcon, resolveCanvasComponent: identifier => canvasComponents.get(String(identifier)) || null, resolveCodeComponent(identifier) {
+      const updated = generateBundle(original, { collectReusable:true, resolveCapturedIcon, resolveCapturedColor, resolveCanvasComponent: identifier => canvasComponents.get(String(identifier)) || null, resolveCodeComponent(identifier) {
         const match = findCodeComponent(identifier, codeFiles)
         return match ? { exportName: match.exportName, importPath: relativeModule(componentPath, 'preview/src/components/code/' + match.path) } : null
       } })
@@ -73,7 +74,8 @@ export function collectCanvasComponents(files:ArchiveFiles) {
 
 export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null,resolveCapturedIcon}:PreviewOptions={}) {
   const files:ArchiveFiles = {}
-  const layouts=layoutModules(layoutSource,pages,resolveCapturedIcon)
+  const designTokens=createDesignTokens(sourceFiles)
+  const layouts=layoutModules(layoutSource,pages,resolveCapturedIcon,designTokens.resolve)
   Object.assign(files,layouts.files)
   if(layoutSource)files['preview/layout-report.json']=JSON.stringify({assignedRoutes:layouts.assignments.size,issues:layouts.issues},null,2)
   const codeFiles = collectCodeFiles(sourceFiles)
@@ -82,7 +84,7 @@ export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFile
   const routeEntries:RouteEntry[] = []
   const reusable:ReusableVariant[] = []
   for (const [i,page] of pages.entries()) {
-    const variantsResult = pageVariantFiles(page, sourceFiles, i, codeFiles, canvasComponents, layouts.assignments.get(page.path) ?? null,resolveCapturedIcon)
+    const variantsResult = pageVariantFiles(page, sourceFiles, i, codeFiles, canvasComponents, layouts.assignments.get(page.path) ?? null,resolveCapturedIcon,designTokens.resolve)
     Object.assign(files, variantsResult.copies)
     reusable.push(...variantsResult.reusable)
     if (!variantsResult.variants.length) continue
@@ -130,7 +132,9 @@ export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFile
   files['preview/src/styles.css'] = `@import "tailwindcss";\n@import "./tokens.css";\n@import "./font-assets.css";\n:root { color-scheme: light; }\n* { box-sizing: border-box; }\nbody { margin:0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }\n.preview-shell { min-height:100vh; display:grid; grid-template-columns:240px minmax(0,1fr); background:#eaeef3; }\n.preview-sidebar { color:#e1e7ed; background:#111b29; padding:20px 12px; display:flex; flex-direction:column; gap:15px; min-height:100vh; }\n.preview-brand { font-size:17px; font-weight:700; padding:0 10px; }\n.preview-brand small { display:block; font-size:11px; font-weight:400; margin-top:4px; color:#91a2b6; }\n.preview-label { font-size:11px; color:#829ab1; letter-spacing:1.5px; padding:10px 10px 0; }\n.preview-routes { display:flex; flex-direction:column; gap:4px; max-height:68vh; overflow:auto; }\n.preview-routes button { font-size:12px; text-align:left; border:0; border-radius:7px; padding:10px; color:#c8d6e6; background:transparent; cursor:pointer; overflow-wrap:anywhere; }\n.preview-routes button:hover { background:#273648; }\n.preview-routes button.selected { background:#275bb1; color:white; }\n.preview-sidebar-foot { border-top:1px solid #344152; padding:18px 10px 0; margin-top:auto; font-size:12px; color:#adbccf; }\n.preview-sidebar-foot p { line-height:1.5; }\n.preview-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; background:white; border-bottom:1px solid #cdd6df; padding:10px 14px; color:#243244; font-size:12px; }\n.preview-toolbar strong { margin-right:auto; overflow-wrap:anywhere; }\n.preview-toolbar label { display:flex; align-items:center; gap:5px; }\n.preview-toolbar select, .preview-toolbar button { font:inherit; background:#f5f8fc; color:#243244; border:1px solid #d1dce9; border-radius:6px; padding:6px; cursor:pointer; }\n.preview-content { min-width:0; }\n.preview-stage { padding:20px; display:flex; justify-content:center; align-items:flex-start; overflow:auto; min-height:calc(100vh - 54px); }\n.exported-page { background:transparent; min-height:0; overflow:visible; box-shadow:none; }\n.preview-full .preview-stage { padding:0; }\n.preview-reopen { position:fixed; z-index:10000; right:14px; bottom:14px; padding:9px 13px; border:0; border-radius:8px; color:white; background:#17263b; cursor:pointer; }\n@media(max-width:730px){.preview-shell{grid-template-columns:1fr}.preview-sidebar{min-height:auto;max-height:220px}.preview-routes{max-height:100px}.preview-stage{padding:8px}}\n`
   // Page breakpoint roots fill their responsive viewport, not the Framer editor's authoring width.
   files['preview/src/styles.css'] += '\n.exported-page > * { width: 100% !important; }\n'
-  files['preview/src/tokens.css'] = sourceFiles['library/tokens.css'] || '/* No shared design tokens exported. */\n'
+  files['preview/src/tokens.css'] = designTokens.css
+  files['preview/design-tokens.csv'] = designTokens.inventory
+  files['preview/design-tokens.json'] = JSON.stringify(designTokens.report(),null,2)
   files['preview/src/font-assets.css'] = sourceFiles['assets/fonts.css'] || ''
   for (const [path,content] of Object.entries(sourceFiles)) {
     if (path.startsWith('assets/') && !path.endsWith('/manifest.json')) files['preview/public/' + path] = content
