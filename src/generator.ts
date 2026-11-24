@@ -157,6 +157,11 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, reso
   if (a.border && typeof a.border === 'object') {
     const bw = cssLen(a.border.width)
     const color = resolveCapturedColor?.(a.border.color,node,'border.color')??cssColor(a.border.color)
+    const style=/^(solid|dashed|dotted|double)$/.test(a.border.style)?a.border.style:'solid'
+    const widths:string[]=typeof a.border.width==='string'?a.border.width.trim().split(/\s+/):[]
+    if(!bw&&color&&widths.length>=2&&widths.length<=4&&widths.every(v=>/^(?:0|\d+(?:\.\d+)?(?:px|em|rem))$/.test(v))){
+      put('border-width',widths.join(' '));put('border-style',style);put('border-color',color)
+    }
     if (bw && color) put('border', `${bw} ${/^(solid|dashed|dotted|double)$/.test(a.border.style) ? a.border.style : 'solid'} ${color}`)
   } else if (typeof a.border === 'string' && /^\d/.test(a.border)) put('border', a.border)
   if (typeof a.opacity === 'number' && a.opacity >= 0 && a.opacity < 1) put('opacity', String(a.opacity))
@@ -337,11 +342,12 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
       const value=attrs['border'+side]
       if(typeof value==='string'){const match=/^(\d+(?:\.\d+)?px) (solid|dashed|dotted|double) (.+)$/.exec(value);if(match){const color=options.resolveCapturedColor?.(match[3],node,'border'+side)??cssColor(match[3]);if(color)edgeBorders['border-'+side.toLowerCase()]=match[1]+' '+match[2]+' '+color}}
     }
-    const overlayBorder = localCss.border
-    if ((overlayBorder||Object.keys(edgeBorders).length) && node.kind === 'FrameNode') {
-      delete localCss.border
+    const overlayBorder:CSSProperties={}
+    for(const k of ['border','border-width','border-style','border-color'])if(localCss[k])overlayBorder[k]=localCss[k]
+    if ((Object.keys(overlayBorder).length||Object.keys(edgeBorders).length) && node.kind === 'FrameNode') {
+      for(const k of Object.keys(overlayBorder))delete localCss[k]
       if (!tw.some(v => ['relative','absolute','fixed','sticky'].includes(v))) tw.push('relative')
-      css[`.${cls}::after`] = {content:'""',position:'absolute',inset:'0',...(overlayBorder?{border:overlayBorder}:{}),...edgeBorders,'border-radius':'inherit','box-sizing':'border-box','pointer-events':'none'}
+      css[`.${cls}::after`] = {content:'""',position:'absolute',inset:'0',...overlayBorder,...edgeBorders,'border-radius':'inherit','box-sizing':'border-box','pointer-events':'none'}
     }
     if (Object.keys(localCss).length) css[`.${cls}`] = localCss
     const className = [...tw, cls].join(' ')
