@@ -1,28 +1,39 @@
-import {expandCanvasTree} from './generator.ts'
-import {generatePreviewFiles,collectCanvasComponents} from './preview.ts'
-import {serializeReferenceVector} from './reference-vector.ts'
-import {svgPath} from './vectors.ts'
-import {buildOverlay} from './enrichment.ts'
+import {generatePreviewFiles,capturedNode} from './preview.ts'
+import {unpackCaptureDocuments,isCaptureDocument} from './cjson.ts'
+import {resolveExactIcon} from './icon-resolver.ts'
+import {svgPath,safeSvg,svgMarkup} from './vectors.ts'
 
-import type {ArchiveFiles,DesignNode,Snapshot,Manifest,Issue,Evidence,LayoutSource,CaptureDiagnostics} from './types.ts'
+import type {ArchiveFiles,DesignNode,Snapshot,Manifest,Issue,LayoutSource,CaptureDiagnostics} from './types.ts'
 export type {ArchiveFiles,DesignNode,Snapshot,Breakpoint,PageRecord,Manifest,Issue,ReferenceDocument,Evidence,LayoutSource} from './types.ts'
-export interface CompileOptions {evidence?:Evidence[];layoutSource?:LayoutSource|null}
 interface AssetRecord {url?:string;path?:string;bundled?:boolean}
 interface AssetManifest {assets?:AssetRecord[]}
+function parseCapturedLayouts(files:ArchiveFiles):LayoutSource|null {
+ const value=files['library/layouts.json']
+ if(typeof value!=='string')return null
+ const d=JSON.parse(value) as LayoutSource
+ if(d.format!=='framer-to-agent/layout-source-v1'||!Array.isArray(d.templates)||!Array.isArray(d.bindings))throw Error('Invalid captured layout library')
+ // All bytes are already bundled in assets/. Never accept inline external asset paths.
+ return {...d,templates:d.templates.map(t=>({...t,variants:t.variants.map(v=>({...v,root:capturedNode(v.root)}))})),assets:{},issues:Array.isArray(d.issues)?d.issues:[]}
+}
 interface GeneratedPackage {scripts:Record<string,string>;[key:string]:unknown}
 
 const safePath = (p:unknown):p is string => typeof p==='string' && p.length<=2048 && !p.startsWith('/') && !p.includes('\\') && p.split('/').every(s=>s && s!=='.' && s!=='..' && !/[\x00-\x1f]/.test(s))
 const prefix = (dir:string) => dir ? dir+'/' : ''
 const parse = <T>(files:ArchiveFiles,key:string):T => { const content=files[key]; if(typeof content!=='string')throw Error('Missing '+key);return JSON.parse(content) as T }
-const walk = (node:DesignNode,fn:(n:DesignNode)=>void):void => {fn(node);for(const c of node.children||[])walk(c,fn)}
+
 
 /** Pure archive -> React compiler. No Framer SDK, network or editor dependency. */
-export function compileReactArchive(rawFiles:ArchiveFiles,{evidence=[],layoutSource=null}:CompileOptions={}){
+export function compileReactArchive(rawFiles:Readonly<ArchiveFiles>,...unsupported:never[]){
+ if(unsupported.length)throw Error("Compiler accepts only the immutable capture archive; verification evidence is not a compiler input")
+ return compileDecoded(rawFiles,new Map())
+}
+const iconIdentity=(n:DesignNode)=>JSON.stringify([n.attributes?.icon??null,n.attributes?.set??n.attributes?.iconSetId??n.attributes?.iconSet??null])
+function compileDecoded(rawFiles:Readonly<ArchiveFiles>,icons:Map<string,string>){
  const manifest=parse<Manifest>(rawFiles,'manifest.json')
  if(!/^framer-to-agent\/(folder|selection)-export-v[1-9]\d*$/.test(manifest.format||''))throw Error('Unsupported capture archive format')
  const pages=manifest.pages || (manifest.format.includes('selection')?[{path:'/',directory:'',breakpoints:[]}]:[])
  if(!Array.isArray(pages)||!pages.length)throw Error('No captured pages')
- const source:ArchiveFiles={};const issues:Issue[]=[];const nodeBreakpoint=new Map<string,string>(),editorNodes=new Map<string,DesignNode>(),routes=new Set<string>(),dirs=new Set<string>()
+ const source:ArchiveFiles={};const issues:Issue[]=[];const routes=new Set<string>(),dirs=new Set<string>()
  let snapshots=0,variants=0
  // Copy only source inputs; never trust generated page drafts or a pre-existing preview.
  for(const [p,v] of Object.entries(rawFiles)){
@@ -35,40 +46,29 @@ export function compileReactArchive(rawFiles:ArchiveFiles,{evidence=[],layoutSou
   if(page.directory!==''&&!safePath(page.directory)||dirs.has(page.directory))throw Error('Invalid or duplicate page directory '+page.directory)
   dirs.add(page.directory)
   const root=parse<Snapshot>(source,prefix(page.directory)+'design.json');if(!Array.isArray(root.roots)||!root.roots.length)throw Error('Empty page snapshot '+page.path)
-  snapshots++;for(const n of root.roots)walk(n,x=>editorNodes.set(x.id,x))
+  snapshots++
   if(page.truncated||root.truncated)issues.push({stage:'capture',severity:'error',route:page.path,message:'Page capture truncated'})
   const bps=page.breakpoints||[]
   for(const bp of bps){
    if(!safePath(bp.directory)||!bp.directory.startsWith(prefix(page.directory)+'breakpoints/')||dirs.has(bp.directory))throw Error('Invalid or duplicate breakpoint directory '+bp.directory)
    dirs.add(bp.directory);const d=parse<Snapshot>(source,bp.directory+'/design.json')
    if(!Array.isArray(d.roots)||!d.roots.length||d.roots[0].id!==bp.id)throw Error('Breakpoint identity mismatch '+bp.directory)
-   snapshots++;for(const n of d.roots)walk(n,x=>{nodeBreakpoint.set(x.id,bp.id);editorNodes.set(x.id,x)})
+   snapshots++
   }
   variants+=bps.length||1
  }
  for(const failure of manifest.failures||[])issues.push({stage:'capture',severity:'error',message:String(failure)})
  if((manifest.requestedPages??pages.length)>pages.length)issues.push({stage:'capture',severity:'error',message:'Requested page coverage incomplete'})
- const canvas=collectCanvasComponents(source)
- // Index occurrence IDs generated from library definitions as well as page-owned nodes.
- // Existing editor nodes retain priority, including original component/vector identities.
- for(const page of pages)for(const bp of page.breakpoints||[]){
-  const d=parse<Snapshot>(source,bp.directory+'/design.json')
-  for(const root of d.roots)walk(expandCanvasTree(root,id=>canvas.get(String(id))||null),n=>{
-   if(!editorNodes.has(n.id)){editorNodes.set(n.id,n);nodeBreakpoint.set(n.id,bp.id)}
-  })
- }
- const validEvidence=evidence.filter(e=>routes.has(e.route)&&pages.find(p=>p.path===e.route)?.breakpoints?.some(b=>b.id===e.doc?.breakpointId&&parseFloat(String(b.width??''))===e.doc?.provenance?.viewport?.width))
- const overlay=buildOverlay(validEvidence,editorNodes,nodeBreakpoint)
- for(const n of Object.values(overlay.nodes)){
-  const svg=serializeReferenceVector(n.vector);if(svg)source[svgPath(svg)]=svg
- }
- source['reference/overlay.json']=JSON.stringify(overlay,null,2)
  let diagnostics:CaptureDiagnostics|null=null;try{diagnostics=parse<CaptureDiagnostics>(source,'diagnostics.json')}catch{}
  const captureDiagnostics=diagnostics?.summary??null
  for(const group of diagnostics?.groups||[]){
   if(['error','warning','review'].includes(group.severity))issues.push({stage:'capture',severity:group.severity,code:group.code,message:group.message,count:group.count})
  }
- const files=generatePreviewFiles(pages,source,{title:manifest.projectName||'Framer export',diagnostics,layoutSource})
+ // Layout definitions, when present, are part of the captured library. No external
+ // evidence or supplemental file can alter this source-only compiler invocation.
+ if(!source['library/layouts.json'])issues.push({stage:'capture',severity:'review',message:'No captured layout-template library; inherited layout completeness is unverified'})
+ for(const svg of icons.values())source[svgPath(svg)]=svg
+ const files=generatePreviewFiles(pages,source,{title:manifest.projectName||'Framer export',diagnostics,layoutSource:parseCapturedLayouts(source),resolveCapturedIcon:n=>icons.get(iconIdentity(n))||null})
  let assets:AssetRecord[]=[];try{assets=parse<AssetManifest>(source,'assets/manifest.json').assets||[]}catch{issues.push({stage:'capture',severity:'warning',message:'Asset manifest missing'})}
  const mappings:[string,string][]=[]
  for(const a of assets){
@@ -84,7 +84,7 @@ export function compileReactArchive(rawFiles:ArchiveFiles,{evidence=[],layoutSou
  }
  const emitted=Object.keys(files).filter(p=>/\/breakpoints\/[^/]+\/Component\.tsx$/.test(p)).length
  if(emitted!==variants)throw Error('Compiler emitted '+emitted+' of '+variants+' expected variants')
- const report={format:'framer-to-agent/compile-report-v1',routes:pages.length,snapshots,expectedVariants:variants,emittedVariants:emitted,captureIssues:issues,captureDiagnostics,captureStatus:issues.some(i=>i.severity==='error')?'incomplete':issues.length?'limitations-reported':'no-known-structural-errors',appliedReferenceNodes:Object.keys(overlay.nodes).length,referenceCoverage:overlay.coverage,skippedEvidence:evidence.length-validEvidence.length,build:{status:'not-run'},fidelity:{status:'unverified',reason:'A separate browser comparison against the authorized source is required.'}}
+ const report={format:'framer-to-agent/compile-report-v1',routes:pages.length,snapshots,expectedVariants:variants,emittedVariants:emitted,captureIssues:issues,captureDiagnostics,captureStatus:issues.some(i=>i.severity==='error')?'incomplete':issues.length?'limitations-reported':'no-known-structural-errors',sourceOnly:true,build:{status:'not-run'},fidelity:{status:'unverified',reason:'A separate browser comparison against the authorized source is required.'}}
  const pkg=parse<GeneratedPackage>(files,'preview/package.json')
  pkg.scripts['build:react']=pkg.scripts.build
  pkg.scripts.build='node scripts/build-react.ts'
@@ -101,6 +101,27 @@ report.build={status:result.status===0?'passed':'failed',startedAt,finishedAt:ne
 fs.writeFileSync(p,JSON.stringify(report,null,2));process.exitCode=result.status??1
 `
  files['preview/compile-report.json']=JSON.stringify(report,null,2)
- files['preview/reference-overlay.json']=JSON.stringify(overlay,null,2)
  return {files,report}
+}
+
+/** Decode the capture's transport encoding and compile; never write to the input. */
+export async function compileCapturedArchive(files:Readonly<ArchiveFiles>){
+ const decoded=await unpackCaptureDocuments(files)
+ const wanted=new Map<string,DesignNode>()
+ const visit=(n:DesignNode):void=>{
+  if(!svgMarkup(n)&&typeof n.attributes?.icon==='string'&&(n.attributes.set||n.attributes.iconSetId||n.attributes.iconSet))wanted.set(iconIdentity(n),n)
+  for(const c of n.children||[])visit(c)
+ }
+ for(const [name,value] of Object.entries(decoded)){
+  if(typeof value!=='string'||!isCaptureDocument(name)||!(name==='design.json'||name.endsWith('/design.json')))continue
+  const snapshot=JSON.parse(value) as Snapshot
+  for(const root of snapshot.roots||[])visit(root)
+ }
+ const icons=new Map<string,string>()
+ for(const [key,node] of wanted){
+  const a=node.attributes!
+  const match=await resolveExactIcon(a.icon,a.set??a.iconSetId??a.iconSet)
+  if(match?.svg)icons.set(key,safeSvg(match.svg))
+ }
+ return compileDecoded(decoded,icons)
 }

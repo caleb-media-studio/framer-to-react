@@ -30,7 +30,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-افتح الإضافة المحلية في بيئة تطوير إضافات Framer. اترك خيار **Raw design archive only** مفعّلًا ونزّل ملف ZIP.
+افتح الإضافة المحلية في بيئة تطوير إضافات Framer. اترك خيار **Compress source JSON (CJSON + reference dictionary)** مفعّلًا ونزّل ملف ZIP.
 
 ```sh
 bun bin/framer-to-react.ts compile design.zip --out react-app
@@ -48,5 +48,7 @@ bun run dev
 
 نجاح البناء لا يعني التطابق البصري الكامل. تُسجّل الأصول غير المتاحة والتفاعلات غير المدعومة والمراجع غير المؤكدة ضمن القيود. راجع `compile-report.json` وتقارير إعادة الاستخدام. استخدم فقط المشاريع التي تملك إذن الوصول إليها. تستخدم جميع الشيفرات التنفيذية للمشروع، بما فيها الإضافة والمترجم وأدوات التحقق والاختبارات، TypeScript الصارم.
 
-[مواصفات الأرشيف](../archive-v5.md) · [التحقق](../../verification/FIDELITY_GATE.md) · [المساهمة](../../CONTRIBUTING.md) · [ترخيص MIT](../../LICENSE).
+[مواصفات الأرشيف](../archive-v6.md) · [التحقق](../../verification/FIDELITY_GATE.md) · [المساهمة](../../CONTRIBUTING.md) · [ترخيص MIT](../../LICENSE).
 
+
+[CJSON/1](../cjson-v1.md) · [Archive v6](../archive-v6.md)

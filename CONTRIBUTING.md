@@ -15,7 +15,7 @@ Node.js and npm are supported: `npm ci`, `npm run typecheck`, `npm test`, `npm r
 
 ## Compiler principles
 
-1. Keep the raw archive independent of React. Do not mutate the source design.
+1. Keep the raw archive independent of React. Do not mutate the source design. The compiler takes only the archive. Published measurements are verification-only. Fix the capture adapter or compiler and regenerate.
 2. Prefer captured source properties and explicit component identities. Keep inferred behavior and reference measurements distinguishable.
 3. Use reusable React modules and route-level loading. Preserve original code components and their instance controls.
 4. Test generic fixtures with different typography, layouts and routes. Never hardcode a regression project's IDs, names, URLs or content.

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CJSON/1 reference",
+  "type": "object",
+  "required": [
+    "format",
+    "keys",
+    "shapes",
+    "strings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "framer-to-react/cjsonref-v1"
+    },
+    "keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "shapes": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "strings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

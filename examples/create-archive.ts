@@ -2,6 +2,7 @@ import type {ArchiveFiles,PageRecord,Attributes,DesignNode,Snapshot} from '../sr
 // Entirely synthetic example; contains no captured private project data.
 import fs from 'node:fs'
 import {zipSync,strToU8} from 'fflate'
+import {packCaptureDocuments} from '../src/cjson.ts'
 import {packagePage} from '../src/pages.ts'
 const output=process.argv[2]||'example-design.zip'
 const files:ArchiveFiles={}
@@ -23,10 +24,10 @@ for(const [i,path] of ['/','/details'].entries()){
  const item=packagePage({id:'page-'+i,path,type:'web'},snapshot(path,i),{rawOnly:true})
  Object.assign(files,item.files);pages.push(item.record)
 }
-files['manifest.json']=JSON.stringify({format:'framer-to-agent/folder-export-v5',captureOnly:true,requestedPages:pages.length,pages,failures:[]},null,2)
+files['manifest.json']=JSON.stringify({format:'framer-to-agent/folder-export-v6',captureOnly:true,requestedPages:pages.length,pages,failures:[]},null,2)
 files['assets/manifest.json']=JSON.stringify({assets:[],warnings:[]})
 files['library/code-files.json']=JSON.stringify([{id:'demo-badge',exportPath:'library/code/Badge.tsx',exports:['Badge']}])
 files['library/code/Badge.tsx']='export function Badge({label}:{label:string}) { return <strong data-demo-badge="true" style={{color:"#93c5fd"}}>{label}</strong> }\n'
-fs.writeFileSync(output,zipSync(Object.fromEntries(Object.entries(files).map(([k,v])=>[k,typeof v==='string'?strToU8(v):v]))))
+fs.writeFileSync(output,zipSync(Object.fromEntries(Object.entries(process.argv.includes('--plain')?files:await packCaptureDocuments(files)).map(([k,v])=>[k,typeof v==='string'?strToU8(v):v]))))
 console.log('Created synthetic raw-only archive:',output)
 

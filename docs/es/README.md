@@ -30,7 +30,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-Abre el complemento local mediante las herramientas de desarrollo de Framer. Exporta el diseño con **Raw design archive only** activado. Después:
+Abre el complemento local mediante las herramientas de desarrollo de Framer. Exporta el diseño con **Compress source JSON (CJSON + reference dictionary)** activado. Después:
 
 ```sh
 bun bin/framer-to-react.ts compile design.zip --out react-app
@@ -48,5 +48,7 @@ La salida incluye `src/components/`, `src/layouts/`, `src/pages/` y `public/asse
 
 La compilación correcta no implica fidelidad visual completa. Los recursos inaccesibles, las interacciones no implementadas y las referencias ambiguas se registran como limitaciones. Consulta `compile-report.json` y los informes de reutilización. Solo utiliza proyectos y referencias que tengas autorización para acceder. Todo el código ejecutable propio, incluido el complemento, el compilador, las herramientas de verificación y las pruebas, utiliza TypeScript estricto.
 
-[Especificación del archivo](../archive-v5.md) · [Verificación](../../verification/FIDELITY_GATE.md) · [Contribuir](../../CONTRIBUTING.md) · [Licencia MIT](../../LICENSE).
+[Especificación del archivo](../archive-v6.md) · [Verificación](../../verification/FIDELITY_GATE.md) · [Contribuir](../../CONTRIBUTING.md) · [Licencia MIT](../../LICENSE).
 
+
+[CJSON/1](../cjson-v1.md) · [Archive v6](../archive-v6.md)

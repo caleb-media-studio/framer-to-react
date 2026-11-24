@@ -1,16 +1,13 @@
+import {captureUsedFonts,includeCapturedFonts} from './capture-fonts.ts'
 import type {ArchiveFiles,AssetRecord,Folder,PageDescriptor,PageRecord,Snapshot,SDKClient,Manifest} from './types.ts'
 import {errorMessage,textFile} from './types.ts'
 interface ExportManifest extends Manifest {pages:PageRecord[];folder:string;warnings:string[];failures:string[];assets?:{referenced:number;bundled:number;bytes:number}}
 import { framer } from '@framer/plugin'
-import { zipSync, strToU8 } from 'fflate'
 import { captureSelection } from './exporter.ts'
-import { generateBundle } from './generator.ts'
-import { discoverPages, buildPageTree, withinFolder, capturePage, packagePage, projectHandoff } from './pages.ts'
+import { discoverPages, buildPageTree, withinFolder, capturePage, packagePage } from './pages.ts'
 import {exportProjectLibrary, collectAssetReferences, bundleAssets, appendLibraryInstructions} from './library.ts'
 import {buildDiagnosticsReport, diagnosticsMarkdown} from './diagnostics.ts'
-import {compileReactArchive} from './react-compiler.ts'
 import {jsonSafe} from './exporter.ts'
-import {hydrateArchiveCodeComponents} from './archive-hydration.ts'
 import './main.css'
 
 const $ = <T extends HTMLElement = HTMLElement>(id:string):T => {
@@ -24,7 +21,7 @@ const selectedText = $('selection')
 const foldersEl = $('folders')
 const refreshBtn = $<HTMLButtonElement>('refresh')
 const exportBtn = $<HTMLButtonElement>('export')
-const rawOnlyEl = $<HTMLInputElement>('raw-only')
+const compressedEl = $<HTMLInputElement>('compressed')
 const selectionBtn = $<HTMLButtonElement>('export-selection')
 const copyBtn = $<HTMLButtonElement>('copy')
 const status = $('status')
@@ -51,9 +48,16 @@ function slug(s:unknown) {
   return String(s || 'framer-design').replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'framer-design'
 }
 async function writeZip(files:ArchiveFiles, name:string) {
-  const zipEntries:Record<string,Uint8Array> = {}
-  for (const [path, content] of Object.entries(files)) zipEntries[path] = content instanceof Uint8Array ? content : strToU8(content)
-  const zip = zipSync(zipEntries, {level: 6})
+  setStatus('Compressing the immutable design archive in a worker...')
+  const zip=await new Promise<Uint8Array>((resolve,reject)=>{
+    const worker=new Worker(new URL('./archive-worker.ts',import.meta.url),{type:'module'})
+    worker.onmessage=({data}:MessageEvent<{ok:boolean;zip?:Uint8Array;error?:string}>)=>{
+      worker.terminate()
+      if(data.ok&&data.zip)resolve(data.zip);else reject(Error(data.error||'Archive encoding failed'))
+    }
+    worker.onerror=e=>{worker.terminate();reject(Error(e.message||'Archive worker failed'))}
+    worker.postMessage({files,compressed:compressedEl.checked})
+  })
   const blob = new Blob([new Uint8Array(zip)], {type:'application/zip'})
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -110,15 +114,6 @@ function showReport(report:ReturnType<typeof buildDiagnosticsReport>) {
     diagnosticList.append(details)
   }
 }
-function relinkDownloadedAssets(files:ArchiveFiles, records:AssetRecord[]) {
-  const mapping = (records || []).filter(item => item.bundled && item.url && item.path)
-  for (const [path, content] of Object.entries(files)) {
-    if (!/(?:^pages\/|^library\/components\/|^preview\/src\/|^Component\.tsx$)/.test(path) || !/\.(tsx|css)$/.test(path) || typeof content !== 'string') continue
-    let next = content
-    for (const record of mapping) next = next.replaceAll(record.url!, '/' + record.path!)
-    files[path] = next
-  }
-}
 function countPages(folder:Folder<PageDescriptor>):number {
   return folder.pages.length + folder.children.reduce((acc, child) => acc + countPages(child), 0)
 }
@@ -152,7 +147,7 @@ function renderFolder(parent:HTMLElement, item:Folder<PageDescriptor>, depth = 0
     selectScope(item.path)
     if (typeof framer.showContextMenu === 'function') {
       try {
-        await framer.showContextMenu([{label:`Export ${item.path === '/' ? 'entire project' : item.path} as React`, onAction:() => exportFolder(item.path)}], {
+        await framer.showContextMenu([{label:`Export ${item.path === '/' ? 'entire project' : item.path} as design archive`, onAction:() => exportFolder(item.path)}], {
           location:{x:e.clientX, y:e.clientY}, placement:'bottom-left', width:230,
         })
       } catch { setStatus('Use the download arrow beside the folder to export.') }
@@ -182,7 +177,7 @@ function renderFolder(parent:HTMLElement, item:Folder<PageDescriptor>, depth = 0
       selectScope(page.path)
       if (typeof framer.showContextMenu === 'function') {
         try {
-          await framer.showContextMenu([{label:'Export page as React', onAction:() => exportFolder(page.path, [page])}], {
+          await framer.showContextMenu([{label:'Export page as design archive', onAction:() => exportFolder(page.path, [page])}], {
             location:{x:e.clientX, y:e.clientY}, placement:'bottom-left', width:200,
           })
         } catch { setStatus('Use the download arrow to export this page.') }
@@ -252,8 +247,8 @@ async function exportFolder(path:string, explicitPages:PageDescriptor[]|null = n
   refreshBtn.disabled = exportBtn.disabled = selectionBtn.disabled = copyBtn.disabled = true
   warningsEl.hidden = true
   diagnosticPanel.hidden = true
-  const rawOnly = rawOnlyEl.checked
-  const manifest:ExportManifest = {format:'framer-to-agent/folder-export-v5',captureOnly:rawOnly,requestedPages:list.length, folder:path, exportedAt:new Date().toISOString(),
+  const rawOnly = true
+  const manifest:ExportManifest = {captureAdapter:'framer-public-plugin-api',format:'framer-to-agent/folder-export-v6',captureOnly:rawOnly,requestedPages:list.length, folder:path, exportedAt:new Date().toISOString(),
     pages:[], warnings:[...discoveredWarnings], failures:[]}
   const files:ArchiveFiles = {}
   const usedPaths = new Set()
@@ -290,11 +285,13 @@ async function exportFolder(path:string, explicitPages:PageDescriptor[]|null = n
     setStatus('Reading shared components, saved styles, code files, and CMS schema...')
     const library = await exportProjectLibrary(sdk,{rawOnly})
     Object.assign(files, library.files)
-    if (!rawOnly) hydrateArchiveCodeComponents(manifest.pages, files)
+    files['library/capture-capabilities.json']=JSON.stringify({adapter:'framer-public-plugin-api',layoutTemplates:'not exposed by installed public Plugin API',overlayTriggers:'not guaranteed by installed public Plugin API',vectorPathGeometry:'only when exposed on SDK node or SVG method',fontVariants:'used exact variants, missing sources reported'},null,2)
     setStatus('Collecting referenced images and SVG assets...')
-    const assets = await bundleAssets(collectAssetReferences([...capturedSnapshots, ...library.componentSnapshots]))
+    const snapshots=[...capturedSnapshots,...library.componentSnapshots]
+    const fonts=await captureUsedFonts(sdk,snapshots,library.warnings)
+    files['library/fonts.json']=JSON.stringify(fonts,null,2)
+    const assets=await bundleAssets(includeCapturedFonts(collectAssetReferences(snapshots),fonts))
     Object.assign(files, assets.files)
-    relinkDownloadedAssets(files, assets.manifest)
     manifest.library = library.summary
     manifest.assets = {referenced:assets.manifest.length,bundled:assets.manifest.filter(x => x.bundled).length,bytes:assets.totalBytes}
     manifest.limitations = library.limitations
@@ -305,16 +302,8 @@ async function exportFolder(path:string, explicitPages:PageDescriptor[]|null = n
     files['diagnostics.json'] = JSON.stringify(report, null, 2)
     files['diagnostics.md'] = diagnosticsMarkdown(report)
     files['manifest.json'] = JSON.stringify(manifest, null, 2)
-    if (!rawOnly) {
-      Object.assign(files, compileReactArchive(files).files)
-      relinkDownloadedAssets(files, assets.manifest)
-    }
-    files['AGENT.md'] = projectHandoff(manifest) + '\nRead diagnostics.md for actual failures and grouped review notes. Full per-layer data is in diagnostics.json.\n' + appendLibraryInstructions(library, assets)
-    files['README.md'] = `# Framer to React folder export\n\nFolder: ${path}\nExported pages: ${manifest.pages.length} of ${list.length}\n\n**Run immediately:** cd preview && npm install && npm run dev and open Vite's localhost URL.\n\nRead AGENT.md and manifest.json. Each route is under pages/ with TSX, CSS, design.json, and breakpoint variants. Shared components, code files, styles and CMS schema are under library/. Referenced images and SVGs are under assets/ where Framer allows local download.\nThis is Framer Plugin API data, not its private source format.\n`
-    if (rawOnly) {
-      files['AGENT.md'] = '# Raw Framer design archive\n\nCompile this immutable archive with the standalone React compiler. Read manifest.json and diagnostics.json for capture coverage and API limitations.\n'
-      files['README.md'] = '# Framer design archive\n\nContains raw design.json trees, component definitions, original code files, styles, assets and capture diagnostics. No generated React or preview. Compile using scripts/compile-react.ts in Framer to React.\n'
-    }
+    files['AGENT.md'] = '# Raw Framer design archive\\n\\nCompile the immutable ZIP with the standalone React compiler. The capture contains no generated React.\\n'
+    files['README.md'] = '# Framer design archive v6\\n\\nContains source JSON (or design.cjson and design.cjsonref), original code and assets. See diagnostics.md for any unavailable source fields. Compile the ZIP with framer-to-react compile.\\n'
     const saved = await writeZip(files, `framer-${slug(path === '/' ? 'entire-project' : path)}-${rawOnly?'design':'react'}.zip`)
     lastHandoff = textFile(files,'AGENT.md')
     copyBtn.disabled = false
@@ -337,16 +326,18 @@ async function exportSelection() {
   diagnosticPanel.hidden = true
   try {
     const snapshot = await captureSelection(sdk, 4000)
-    const rawOnly = rawOnlyEl.checked
-    const bundle = rawOnly ? {componentName:"selection",json:JSON.stringify(snapshot,null,2),agent:"# Raw selection archive\nCompile design.json with the React compiler."} : generateBundle(snapshot)
+    const rawOnly = true
+    const bundle = {componentName:'selection',json:JSON.stringify(snapshot,null,2),agent:'# Raw selection archive\nCompile with the standalone React compiler.'}
     setStatus('Reading reusable components and styles...')
     const library = await exportProjectLibrary(sdk,{rawOnly})
-    const assets = await bundleAssets(collectAssetReferences([snapshot, ...library.componentSnapshots]))
+    const snapshots=[snapshot,...library.componentSnapshots]
+    const fonts=await captureUsedFonts(sdk,snapshots,library.warnings)
+    library.files['library/fonts.json']=JSON.stringify(fonts,null,2)
+    const assets=await bundleAssets(includeCapturedFonts(collectAssetReferences(snapshots),fonts))
     const report = buildDiagnosticsReport({snapshots:[snapshot],library,assets,selection:true})
     const handoff = bundle.agent + '\nConsult diagnostics.md and diagnostics.json for actual issues and component inventory.\n' + appendLibraryInstructions(library, assets)
     lastHandoff = handoff
     const selectionFiles:ArchiveFiles = {
-      ...('tsx' in bundle?{'Component.tsx':bundle.tsx,'component.css':bundle.css}:{}),
       'design.json':bundle.json,
       'AGENT.md':handoff,
       'README.md':'# Selection export\n\nRun: `cd preview && npm install && npm run dev`\n\nSee AGENT.md and diagnostics.md for limitations.\n',
@@ -354,14 +345,9 @@ async function exportSelection() {
       ...assets.files,
       'diagnostics.json':JSON.stringify(report,null,2),
       'diagnostics.md':diagnosticsMarkdown(report),
-      'manifest.json':JSON.stringify({format:'framer-to-agent/selection-export-v5',captureOnly:rawOnly,pages:[{path:'/',directory:'',breakpoints:[]}],nodeCount:snapshot.nodeCount,library:library.summary,assets:{referenced:assets.manifest.length,bundled:assets.manifest.filter(x=>x.bundled).length},diagnostics:report.summary,limitations:library.limitations},null,2),
+      'manifest.json':JSON.stringify({format:'framer-to-agent/selection-export-v6',captureAdapter:'framer-public-plugin-api',captureOnly:rawOnly,pages:[{path:'/',directory:'',breakpoints:[]}],nodeCount:snapshot.nodeCount,library:library.summary,assets:{referenced:assets.manifest.length,bundled:assets.manifest.filter(x=>x.bundled).length},diagnostics:report.summary,limitations:library.limitations},null,2),
     }
-    if (!rawOnly) {
-      hydrateArchiveCodeComponents([{path:'/',directory:'',breakpoints:[]}], selectionFiles)
-      relinkDownloadedAssets(selectionFiles, assets.manifest)
-      Object.assign(selectionFiles, compileReactArchive(selectionFiles).files)
-      relinkDownloadedAssets(selectionFiles, assets.manifest)
-    } else selectionFiles['README.md'] = '# Raw design selection\n\nCompile this archive independently. No React draft is included.\n'
+    selectionFiles['README.md'] = '# Raw design selection\\n\\nCompile this immutable archive independently.\\n'
     const saved = await writeZip(selectionFiles, `framer-${slug(bundle.componentName)}.zip`)
     copyBtn.disabled = false
     setStatus(saved + `Exported ${snapshot.nodeCount} layers and ${assets.manifest.filter(x=>x.bundled).length} bundled assets. ${report.summary.errors} errors, ${report.summary.warnings} warnings.`)

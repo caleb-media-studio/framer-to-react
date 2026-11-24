@@ -1,17 +1,22 @@
-import type {ArchiveFiles,PageRecord,DesignNode,Overlay,LayoutTemplate,LayoutSource,CaptureDiagnostics,CodeFile,ReusableBlock,ReusableVariant,JsonObject} from './types.ts'
+import type {ArchiveFiles,PageRecord,DesignNode,Snapshot,LayoutTemplate,LayoutSource,CaptureDiagnostics,CodeFile,ReusableBlock,ReusableVariant,JsonObject} from './types.ts'
 import {textFile} from './types.ts'
 interface PageVariant {label:string;primary:boolean;width:string|number|null;componentPath:string;layoutPath:string|null}
-interface PreviewOptions {title?:string;diagnostics?:CaptureDiagnostics|null;layoutSource?:LayoutSource|null}
+interface PreviewOptions {title?:string;diagnostics?:CaptureDiagnostics|null;layoutSource?:LayoutSource|null;resolveCapturedIcon?:(node:DesignNode)=>string|null}
 interface RouteEntry {path:string;loader:string;variants:{label:string;primary:boolean;width:number}[]}
 import {layoutModules,selectLayoutVariant,layoutModulePath,contentWithinLayout} from './official-layouts.ts'
 import {generateBundle} from './generator.ts'
 import {collectCodeFiles,findCodeComponent} from './code-components.ts'
-import {applyOverlay,parseOverlay} from './enrichment.ts'
 import {generateReusableModules,relativeModule,routeDirectory} from './reuse.ts'
 /** Build an independent Vite / React / Tailwind preview in every export. */
 const json = (value:unknown) => JSON.stringify(value)
+// Strip only legacy renderer evidence from node records, never captured control values.
+export function capturedNode(node:DesignNode):DesignNode {
+ const {reference:discarded,...rest}=node
+ return {...rest,children:(node.children||[]).map(capturedNode)}
+}
+function capturedSnapshot(snapshot:Snapshot):Snapshot{return {...snapshot,roots:snapshot.roots.map(capturedNode)}}
 
-function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number, codeFiles:CodeFile[] = [], canvasComponents = new Map<string,DesignNode>(), overlay:Overlay|null = null, template:LayoutTemplate|null = null) {
+function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number, codeFiles:CodeFile[] = [], canvasComponents = new Map<string,DesignNode>(), template:LayoutTemplate|null = null, resolveCapturedIcon?: (node:DesignNode)=>string|null) {
   // Page-level snapshots contain every breakpoint canvas: never render these together.
   const bps = (page.breakpoints || []).filter(bp => bp.directory)
   const targets = bps.length ? [...bps].sort((a,b)=>Number(Boolean(b.primary))-Number(Boolean(a.primary)))
@@ -30,9 +35,9 @@ function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number,
     const componentPath = target + '/Component.tsx'
     let blocks:ReusableBlock[] = []
     if (typeof files[source + 'design.json'] === 'string') {
-      const captured = applyOverlay(JSON.parse(textFile(files,source + 'design.json')), overlay)
+      const captured = capturedSnapshot(JSON.parse(textFile(files,source + 'design.json')) as Snapshot)
       const original = template ? contentWithinLayout(captured) : captured
-      const updated = generateBundle(original, { collectReusable:true, referenceOverlay:overlay, resolveCanvasComponent: identifier => canvasComponents.get(String(identifier)) || null, resolveCodeComponent(identifier) {
+      const updated = generateBundle(original, { collectReusable:true, resolveCapturedIcon, resolveCanvasComponent: identifier => canvasComponents.get(String(identifier)) || null, resolveCodeComponent(identifier) {
         const match = findCodeComponent(identifier, codeFiles)
         return match ? { exportName: match.exportName, importPath: relativeModule(componentPath, 'preview/src/components/code/' + match.path) } : null
       } })
@@ -60,26 +65,24 @@ export function collectCanvasComponents(files:ArchiveFiles) {
     if (typeof def?.id !== 'string' || typeof def.folder !== 'string') continue
     try {
       const root = JSON.parse(textFile(files,def.folder + '/design.json','null'))?.roots?.[0]
-      if (root?.kind === 'ComponentNode') map.set(def.id, root)
+      if (root?.kind === 'ComponentNode') map.set(def.id, capturedNode(root))
     } catch {}
   }
   return map
 }
 
-export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null}:PreviewOptions={}) {
+export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null,resolveCapturedIcon}:PreviewOptions={}) {
   const files:ArchiveFiles = {}
   const layouts=layoutModules(layoutSource,pages)
   Object.assign(files,layouts.files)
   if(layoutSource)files['preview/layout-report.json']=JSON.stringify({assignedRoutes:layouts.assignments.size,issues:layouts.issues},null,2)
   const codeFiles = collectCodeFiles(sourceFiles)
   const canvasComponents = collectCanvasComponents(sourceFiles)
-  // Present only after the opt-in enrichment step (scripts/enrich-export.ts); normal exports have no reference/.
-  const overlay = typeof sourceFiles['reference/overlay.json'] === 'string' ? parseOverlay(sourceFiles['reference/overlay.json']) : null
   for (const file of codeFiles) files[`preview/src/components/code/${file.path}`] = file.source
   const routeEntries:RouteEntry[] = []
   const reusable:ReusableVariant[] = []
   for (const [i,page] of pages.entries()) {
-    const variantsResult = pageVariantFiles(page, sourceFiles, i, codeFiles, canvasComponents, overlay, layouts.assignments.get(page.path) ?? null)
+    const variantsResult = pageVariantFiles(page, sourceFiles, i, codeFiles, canvasComponents, layouts.assignments.get(page.path) ?? null,resolveCapturedIcon)
     Object.assign(files, variantsResult.copies)
     reusable.push(...variantsResult.reusable)
     if (!variantsResult.variants.length) continue
@@ -132,7 +135,7 @@ export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFile
   for (const [path,content] of Object.entries(sourceFiles)) {
     if (path.startsWith('assets/') && !path.endsWith('/manifest.json')) files['preview/public/' + path] = content
   }
-  files['preview/public/asset-report.json'] = sourceFiles['assets/manifest.json'] || '{"assets":[],"warnings":[]}\n'
+  files['preview/public/asset-report.json'] = JSON.stringify(JSON.parse(textFile(sourceFiles,'assets/manifest.json','{"assets":[],"warnings":[]}')),null,2)+'\n'
   files['preview/README.md'] = `# Runnable Framer to React export\n\nRun this preview before handing the export to your coding agent:\n\n\`\`\`bash\ncd preview\nnpm install\nnpm run dev\n\`\`\`\n\nOpen the localhost URL shown by Vite. Select an exported page, breakpoint, and viewport.\n\nTo check compilation: \`npm run build\`. This preview is intentionally independent of Framer, paid services, and the main plugin.\n\nProject structure: \`src/pages/\` mirrors the exported URL hierarchy; each route has a Page.tsx entry and breakpoint modules. \`src/components/canvas/\` contains reusable captured canvas components, \`src/components/code/\` holds original code components, and \`src/layouts/\` contains repeated layout templates. Instance CSS and source IDs stay local to each page/breakpoint. See \`reuse-report.json\` for actual module reuse.\n\nThis is **first-pass code**. Framer-only interactivity, unpublished vector paths, custom components, animations, and rich responsive behavior can require further implementation. Any unbundled assets may still reference their original remote URLs. Check \`../diagnostics.md\` and \`public/asset-report.json\` for failures.\n`
   if (codeFiles.length) {
     files['preview/src/framer-compat.ts'] = `/** Editor-only property control compatibility; unsupported Framer runtime APIs remain build errors. */\nexport const ControlType = new Proxy({} as Record<string,string>, { get:(_target,key) => String(key) })\nexport function addPropertyControls(_component:unknown, _controls:unknown):void {}\n`
