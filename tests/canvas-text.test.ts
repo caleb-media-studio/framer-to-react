@@ -1,7 +1,7 @@
 import type {DesignNode,Attributes,Snapshot} from '../src/types.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {generateBundle, textWithLayerBreaks, expandCanvasInstance} from '../src/generator.ts'
+import {generateBundle, textWithLayerBreaks, expandCanvasInstance, expandCanvasTree} from '../src/generator.ts'
 import {collectCanvasComponents} from '../src/preview.ts'
 
 const text = (name:string, value:string):DesignNode => ({id: 't', kind: 'TextNode', attributes: {name}, text: value, children: []})
@@ -99,4 +99,19 @@ test('frame borders are painted over the box without consuming stack padding', (
   assert.ok(base)
   assert.doesNotMatch(base, /\bborder:/)
   assert.match(b.tsx,/className="[^"]*relative/)
+})
+
+test('scopes expanded source text identities and independently applies reference evidence',()=>{
+ const one=instance({variant:'vB'}),two={...one,id:'I2'}
+ const root:DesignNode={id:'root',kind:'FrameNode',children:[one,two]}
+ const resolve=()=>lockup
+ const expanded=expandCanvasTree(root,resolve)
+ assert.equal(expanded.children![0].children![0].id,'I::vBt')
+ assert.equal(expanded.children![1].children![0].id,'I2::vBt')
+ assert.equal(lockup.children[1].children![0].id,'vBt')
+ const overlay={format:'test',nodes:{'I::vBt':{textStyle:{fontSize:'12px',lineHeight:'14.4px',color:'rgb(145, 152, 161)'}},'I2::vBt':{textStyle:{fontSize:'18px'}}},conflicts:[],coverage:[]}
+ const {tsx,css}=generateBundle({roots:[root]},{resolveCanvasComponent:resolve,referenceOverlay:overlay})
+ assert.ok(tsx.includes('data-f2a-node="I::vBt"')&&tsx.includes('data-f2a-node="I2::vBt"'))
+ assert.match(css,/font-size: 12px/);assert.match(css,/font-size: 18px/)
+ assert.match(css,/color: rgb\(145, 152, 161\)/)
 })

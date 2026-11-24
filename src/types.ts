@@ -48,6 +48,7 @@ export interface ReusableVariant {path:string;route:string;tsx:string;blocks:Reu
 export interface RenderOptions {
   layoutSlot?:boolean
   collectReusable?:boolean
+  referenceOverlay?:Overlay|null
   resolveCodeComponent?:(identifier:unknown)=>CodeImport|null
   resolveCanvasComponent?:(identifier:unknown)=>DesignNode|null
 }

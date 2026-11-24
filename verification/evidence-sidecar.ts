@@ -8,6 +8,9 @@ import { join } from 'node:path';
 
 import { chromium } from '@playwright/test';
 
+import {expandCanvasTree} from '../src/generator.ts';
+import {collectCanvasComponents} from '../src/preview.ts';
+import type {ArchiveFiles,DesignNode} from '../src/types.ts';
 import { archiveTexts, breakpointForWidth, matchTexts, type LiveText } from './evidence-match.ts';
 
 const WIDTHS = [390, 810, 1200, 1920] as const;
@@ -50,7 +53,12 @@ function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[] {
   return [...document.querySelectorAll('[data-framer-component-type="RichTextContainer"]')]
     .filter((el) => el.checkVisibility())
     .map((el) => {
-      const block = el.querySelector('h1,h2,h3,h4,h5,h6,p,li') ?? el;
+      let block = el.querySelector('h1,h2,h3,h4,h5,h6,p,li') ?? el;
+      if(block===el){
+        // Framer can emit a RichTextContainer whose whole text lives in nested spans.
+        // Follow a single text-preserving inline chain rather than reading wrapper defaults.
+        while(block.children.length===1&&block.firstElementChild?.tagName==='SPAN'&&block.firstElementChild.textContent===block.textContent&&/^(inline|block|inline-block)$/.test(getComputedStyle(block.firstElementChild).display))block=block.firstElementChild;
+      }
       const cs = getComputedStyle(block) as unknown as Record<string, string>;
       const r = el.getBoundingClientRect();
       const style: Record<string, string> = { tag: block.tagName.toLowerCase(), blocks: String(el.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li').length) };
@@ -110,6 +118,18 @@ async function main(): Promise<void> {
   }
   const routesArg = process.argv[process.argv.indexOf('--routes') + 1];
   const designs = readDesigns(exportDir);
+  const library:ArchiveFiles={}
+  const defsPath=join(exportDir,'library/components.json')
+  if(existsSync(defsPath)){
+    library['library/components.json']=readFileSync(defsPath,'utf8')
+    const defs=JSON.parse(library['library/components.json']) as {folder:string}[]
+    for(const def of defs){
+      if(typeof def.folder!=='string'||!def.folder.startsWith('library/components/')||def.folder.split('/').some(p=>p==='..'||p==='.'||!p)||def.folder.includes('\\'))continue
+      const key=def.folder+'/design.json';const file=join(exportDir,key)
+      if(existsSync(file))library[key]=readFileSync(file,'utf8')
+    }
+  }
+  const canvas=collectCanvasComponents(library)
   const routes = !process.argv.includes('--routes') ? ['/'] : routesArg === 'all' ? designs.map((d) => d.pagePath) : routesArg.split(',');
   mkdirSync(outDir, { recursive: true });
 
@@ -129,11 +149,12 @@ async function main(): Promise<void> {
         const res = await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
         if (!res || !res.ok()) { summary.push({ route, width, error: `HTTP ${res?.status() ?? 'no response'} for ${url}` }); continue; }
         await page.waitForTimeout(SETTLE_MS);
+        await page.evaluate(()=>document.fonts.ready);
         const body = await res.body();
         const live = (await page.evaluate(collectLive, STYLE_PROPS)).map((l, index) => ({ ...l, index }));
         const userAgent = await page.evaluate(() => navigator.userAgent);
 
-        const archive = frame ? archiveTexts(frame) : [];
+        const archive = frame ? archiveTexts(expandCanvasTree(frame as DesignNode,id=>canvas.get(String(id))||null)) : [];
         const result = frame ? matchTexts(archive, live) : { matches: [], unmatchedArchive: [], unmatchedLive: live.map((l) => l.index) };
         const evidence = result.matches.map((m) => {
           const l = live[m.liveIndex];

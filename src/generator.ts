@@ -235,7 +235,18 @@ export function expandCanvasInstance(instance:DesignNode, component:DesignNode|n
   const attributes:Attributes = {...variant.attributes}
   for (const key of OFFSET_KEYS) delete attributes[key]
   for (const key of ['name','position','width','height','visible','opacity','rotation',...OFFSET_KEYS]) if (ia[key] !== undefined) attributes[key] = ia[key]
-  return {...variant, id: instance.id, kind: 'FrameNode', attributes, children: variant.children || []}
+  // Definition IDs repeat for every instance. Use stable occurrence IDs so evidence
+  // never applies one instance's text style to an unrelated placement.
+  const scope=(n:DesignNode):DesignNode=>({...n,id:instance.id+'::'+encodeURIComponent(n.id),children:(n.children||[]).map(scope)})
+  return {...variant, id: instance.id, kind: 'FrameNode', attributes, children: (variant.children || []).map(scope)}
+}
+// Read-only expansion for matching and indexing. Uses exactly the renderer's variant
+// resolution and depth bound; the original archive remains immutable.
+export function expandCanvasTree(node:DesignNode,resolve:(id:unknown)=>DesignNode|null,depth=2):DesignNode {
+  const expanded=node.kind==='ComponentInstanceNode'&&!node.children?.length&&depth<MAX_INSTANCE_DEPTH
+    ? expandCanvasInstance(node,resolve(node.attributes?.componentIdentifier)) : null
+  const root=expanded||node
+  return {...root,children:(root.children||[]).map(c=>expandCanvasTree(c,resolve,depth+1))}
 }
 /** A breakpoint's canvas position (absolute at 0,0) would take the page out of flow and collapse the document height. */
 export function inFlowRoot(root:DesignNode) {
@@ -301,6 +312,8 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     return '  '.repeat(depth) + '{/*__FTA_REUSE_' + id + '__*/}'
   }
   function renderNode(node:DesignNode, depth:number, parentAxis:Axis = null, parent:DesignNode|null = null, field:NativeField|null = null):string {
+    const reference=options.referenceOverlay?.nodes[node.id]
+    if(reference)node={...node,reference}
     const id = ++nodeIndex
     const cls = `f2a-${namespace}-${id}`
     const attrs = node.attributes || {}

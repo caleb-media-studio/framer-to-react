@@ -62,6 +62,12 @@ try{
  assert.ok(broken.findings.some(f=>f.fields.some(x=>x.field==='divider.presence')))
  assert.ok(broken.findings.some(f=>f.fields.some(x=>x.field==='fontWeight')))
  assert.ok(broken.findings.some(f=>f.fields.some(x=>x.field==='color')))
+ // A Framer wrapper may have default link styles while its nested span paints the text.
+ await auditPage.setContent('<div data-framer-component-type="RichTextContainer" style="color:blue;font:16px Arial"><span style="display:block"><span style="font:400 12px/14.4px Arial;color:rgb(145,152,161)">Nested label</span></span></div>')
+ const nested=await auditPage.evaluate(collectRenderAudit,'source' as const)
+ assert.equal(nested.texts[0].style.fontSize,'12px')
+ assert.equal(nested.texts[0].style.color,'rgb(145, 152, 161)')
+ assert.equal(nested.texts[0].style.fontWeight,'400')
  await auditPage.close()
  console.log('Browser smoke passed: lazy routes, original named TSX component and controls, editable field, history, responsive variant, direct URL.')
 }finally{await browser.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}
