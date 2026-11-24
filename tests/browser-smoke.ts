@@ -34,6 +34,12 @@ try{
  await page.locator('[data-demo-badge]').waitFor()
  assert.equal(await page.locator('[data-demo-badge]').textContent(),'Ready')
  assert.equal(requests.size,1,'only active page chunk loaded')
+ const intrinsic=await page.locator('[data-f2a-node="page-0-1200-intrinsic"]').boundingBox()
+ const bounded=await page.locator('[data-f2a-node="page-0-1200-bounded"]').boundingBox()
+ assert.ok(intrinsic&&bounded)
+ assert.ok(intrinsic.width>100,'intrinsic source text retains natural width inside narrow clipped parent')
+ assert.ok(bounded.width<=100&&bounded.height>intrinsic.height,'captured max width still causes wrapping')
+
  const input=page.locator('.exported-page input[type=email]')
  await input.fill('person@example.test')
  assert.equal(await input.inputValue(),'person@example.test')

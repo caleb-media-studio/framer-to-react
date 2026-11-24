@@ -188,7 +188,10 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, reso
     // Opt-in published reference (src/enrichment.ts); only fills fields the editor capture lacks.
     const ref = node.reference?.textStyle || {}
     const whiteSpace = ts.whiteSpace ?? a.whiteSpace ?? ref.whiteSpace
-    // The source treats intrinsic fit-content labels as non-wrapping unless evidence says otherwise.
+    // Framer Fit text measures its intrinsic width, even in a narrower stack.
+    // CSS fit-content instead clamps to available width and may add a line.
+    // Explicit min/max widths and hard breaks still apply.
+    if (s.width === 'fit-content') put('width', 'max-content')
     put('white-space', /^(pre|pre-wrap|pre-line|normal|nowrap|break-spaces)$/.test(whiteSpace) ? whiteSpace : 'pre-wrap')
     if(/^(balance|pretty|wrap|nowrap)$/.test(a.textWrap))put('text-wrap',a.textWrap)
     const font = a.font || {}
