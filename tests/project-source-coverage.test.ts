@@ -42,7 +42,7 @@ test('original page-tree shards use one validated compiler adapter for every rou
  raw[EDITOR_PROJECT]=JSON.stringify(index)
  for(const [i,p] of manifest.pages!.entries()){
   const text={id:'same',type:'RichTextNode',$scopeId:p.id,$groundNodeId:'bp',text:'Same',fontName:'Geist',fontSize:i?'18px':'12px',fontWeight:i?600:400,textColor:i?'#ffffff':'#9198a1'}
-  const tree={id:p.id,type:'WebPageNode',children:[{id:'bp',type:'FrameNode',$scopeId:p.id,$groundNodeId:'bp',children:[text]}]}
+  const tree={id:p.id,type:'WebPageNode',children:[{id:'bp',type:'FrameNode',$scopeId:p.id,$groundNodeId:'bp',children:[text]},{id:'loose-artwork',type:'SVGNode',name:'Loose canvas artwork',$scopeId:p.id,$groundNodeId:'loose-artwork',children:[]}]}
   raw['library/editor-pages/'+p.id+'.json']=JSON.stringify({format:'framer-to-agent/editor-page-v1',projectId:'test',branch:'main',pageId:p.id,path:p.path,tree,vectors:[]})
   const snap=JSON.stringify({roots:[{id:'bp',kind:'FrameNode',attributes:{width:'1200px'},children:[{id:'same',kind:'TextNode',text:'Same'}]}]})
   raw[p.directory+'/design.json']=snap;raw[p.breakpoints![0].directory+'/design.json']=snap

@@ -50,7 +50,14 @@ export function readProjectEditorCapture(files:Readonly<ArchiveFiles>,manifest:M
   const vectors=new Map<string,string>()
   for(const v of doc.vectors??[]){if(typeof v.id!=='string'||typeof v.svg!=='string'||vectors.has(v.id))throw Error('Invalid captured vector');vectors.set(v.id,v.svg)}
   const expectedBreakpoints=new Set((p.breakpoints??[]).map(b=>b.id))
-  const roots=doc.tree.children??[]
+  // A page can also contain loose canvas artwork outside its web breakpoints.
+  // Preserve it verbatim in the capture, but do not treat it as a rendered viewport.
+  const allRoots=doc.tree.children??[]
+  const roots=allRoots.filter(b=>expectedBreakpoints.has(b.id))
+  const loose=allRoots.filter(b=>!expectedBreakpoints.has(b.id))
+  if(loose.some(b=>b.$mediaQuery||b.$isPrimary))throw Error('Undeclared editor breakpoint '+entry.path)
+  function checkLoose(n:OfficialNode){if(n.$truncated)throw Error('Truncated loose canvas node '+n.id);vectors.delete(n.id);for(const c of n.children??[])checkLoose(c)}
+  for(const n of loose)checkLoose(n)
   if(roots.length!==expectedBreakpoints.size||new Set(roots.map(b=>b.id)).size!==roots.length||roots.some(b=>!expectedBreakpoints.has(b.id)))throw Error('Editor page breakpoint coverage mismatch '+entry.path)
   if(doc.tree.$truncated)throw Error('Truncated editor page '+entry.path)
   function visit(n:OfficialNode,bp:string){
