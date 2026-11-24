@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/caleb-media-studio/framer-to-react/blob/main/schemas/manifest-v5.schema.json",
+  "title": "Framer design archive manifest v5",
+  "type": "object",
+  "required": [
+    "format"
+  ],
+  "properties": {
+    "format": {
+      "enum": [
+        "framer-to-agent/folder-export-v5",
+        "framer-to-agent/selection-export-v5"
+      ]
+    },
+    "captureOnly": {
+      "type": "boolean"
+    },
+    "requestedPages": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/page"
+      }
+    },
+    "failures": {
+      "type": "array"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "format": {
+            "const": "framer-to-agent/folder-export-v5"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "pages"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "page": {
+      "type": "object",
+      "required": [
+        "path",
+        "directory"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "breakpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "directory"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "width": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "primary": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
