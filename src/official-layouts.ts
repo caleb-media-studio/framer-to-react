@@ -1,3 +1,4 @@
+import {deriveEditorRichText} from './editor-rich-text.ts'
 import type {ColorResolver} from './design-tokens.ts'
 import type {DesignNode,Snapshot,Attributes,ArchiveFiles,LayoutSource,LayoutTemplate,LayoutVariant,LayoutBinding,PageRecord,Issue} from './types.ts'
 export interface OfficialNode {id:string;type:string;children?:OfficialNode[];[key:string]:any}
@@ -33,6 +34,8 @@ export async function prepareOfficialLayouts(doc:OfficialDocument,controls:IconC
   if(kind==='TextNode'){
    out.text=String(n.text??'')
    a.editorTextSource=true
+   const rich=deriveEditorRichText(n);if(rich){Object.assign(a,rich.base);a.editorRichText=rich}
+   if(typeof n.textWrap==='string')a.textWrap=n.textWrap
    if(n.tag)a.tag=n.tag
    const blocks=n.children||[]
    if(blocks.length>1||blocks.some(b=>(b.children||[]).length>1))issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Rich text run formatting requires verification'})

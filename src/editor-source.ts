@@ -1,3 +1,4 @@
+import {deriveEditorRichText,hasExplicitRunProperty} from './editor-rich-text.ts'
 import type {ArchiveFiles,Manifest,Snapshot,DesignNode} from './types.ts'
 import type {OfficialDocument,OfficialNode} from './official-layouts.ts'
 export const EDITOR_SOURCE='library/editor-source.json'
@@ -43,27 +44,31 @@ export function createEditorTextResolver(d:EditorSource,nodeResolver?:import('./
  const resolve=(snapshot:Snapshot,pageId:string):Snapshot=>{
   const visit=(node:DesignNode,bp:string):DesignNode=>{
    const key=JSON.stringify([pageId,bp,node.id]),t=nodes.get(key)
+   const rich=t?deriveEditorRichText(t):null
    let current=nodeResolver?.resolve(node,pageId,bp)??node
    if(node.kind==='TextNode'||node.kind==='RichTextNode'){
     const a=node.attributes??{}, inline=a.inlineTextStyle??{}
     const missing:string[]=[]
-    if(!t?.fontSize&&!inline.fontSize&&!a.fontSize)missing.push('fontSize')
-    if(!t?.textColor&&!inline.color&&!inline.textColor&&!a.textColor&&!a.color)missing.push('textColor')
-    if(!t?.fontName&&!a.font?.family&&!inline.font?.family&&!a.fontFamily)missing.push('fontFamily')
-    if(t?.fontWeight==null&&a.font?.weight==null&&a.fontWeight==null&&inline.fontWeight==null)missing.push('fontWeight')
+    if(!t?.fontSize&&!hasExplicitRunProperty(rich,'fontSize')&&!inline.fontSize&&!a.fontSize)missing.push('fontSize')
+    if(!t?.textColor&&!hasExplicitRunProperty(rich,'textColor')&&!inline.color&&!inline.textColor&&!a.textColor&&!a.color)missing.push('textColor')
+    if(!t?.fontName&&!hasExplicitRunProperty(rich,'fontName')&&!a.font?.family&&!inline.font?.family&&!a.fontFamily)missing.push('fontFamily')
+    if(t?.fontWeight==null&&!hasExplicitRunProperty(rich,'fontWeight')&&a.font?.weight==null&&a.fontWeight==null&&inline.fontWeight==null)missing.push('fontWeight')
     observed.set(key,{pageId,breakpointId:bp,nodeId:node.id,missing,matched:!!t})
    }
    if(t&&(node.kind==='TextNode'||node.kind==='RichTextNode')){
     if(node.text!==t.text&&String(node.text??'').replace(/\n/g,'')!==t.text.replace(/\n/g,''))conflicts.add(key)
     else{
      const a:import("./types.ts").Attributes={...node.attributes,editorTextSource:true},font={...a.font}
-     for(const field of styleFields)if(t[field]!==undefined&&t[field]!==null)a[field]=t[field]
-     if(typeof t.fontName==='string')font.family=t.fontName
-     if(typeof t.fontWeight==='number')font.weight=t.fontWeight
-     if(typeof t.fontStyle==='string')font.style=t.fontStyle
+     const resolved={...rich?.base,...t}
+     for(const field of styleFields)if(resolved[field]!==undefined&&resolved[field]!==null)a[field]=resolved[field]
+     if(typeof t.textWrap==='string')a.textWrap=t.textWrap
+     if(rich)a.editorRichText=rich
+     if(typeof resolved.fontName==='string')font.family=resolved.fontName
+     if(typeof resolved.fontWeight==='number')font.weight=resolved.fontWeight
+     if(typeof resolved.fontStyle==='string')font.style=resolved.fontStyle
      a.font=font
      const inline={...a.inlineTextStyle}
-     for(const [from,to] of [['fontSize','fontSize'],['lineHeight','lineHeight'],['letterSpacing','letterSpacing'],['textColor','color'],['textAlignment','alignment'],['textAlign','alignment'],['textDecoration','decoration'],['textTransform','transform']] as const)if(t[from]!=null)inline[to]=t[from]
+     for(const [from,to] of [['fontSize','fontSize'],['lineHeight','lineHeight'],['letterSpacing','letterSpacing'],['textColor','color'],['textAlignment','alignment'],['textAlign','alignment'],['textDecoration','decoration'],['textTransform','transform']] as const)if(resolved[from]!=null)inline[to]=resolved[from]
      if(Object.keys(inline).length)a.inlineTextStyle=inline
      if((t.children??[]).length>1||(t.children??[]).some(b=>(b.children??[]).length>1))complex.add(key)
      applied.add(key);current={...node,attributes:a,text:t.text}

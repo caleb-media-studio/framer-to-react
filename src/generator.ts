@@ -1,3 +1,4 @@
+import type {EditorRichText} from './editor-rich-text.ts'
 import type {ColorResolver} from './design-tokens.ts'
 import {validateInlineRuns} from './inline-text.ts'
 import type {Attributes,DesignNode,Snapshot,Axis,CSSProperties,RenderOptions,CodeImport,ReusableBlock,NativeField} from './types.ts'
@@ -189,6 +190,7 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, reso
     const whiteSpace = ts.whiteSpace ?? a.whiteSpace ?? ref.whiteSpace
     // The source treats intrinsic fit-content labels as non-wrapping unless evidence says otherwise.
     put('white-space', /^(pre|pre-wrap|pre-line|normal|nowrap|break-spaces)$/.test(whiteSpace) ? whiteSpace : 'pre-wrap')
+    if(/^(balance|pretty|wrap|nowrap)$/.test(a.textWrap))put('text-wrap',a.textWrap)
     const font = a.font || {}
     const family = font.family || ts.font?.family || a.fontName || a.fontFamily
     put('font-family', typeof family === 'string' ? JSON.stringify(family) : null)
@@ -376,9 +378,28 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     }
     const ownField = nativeField(node,parent)
     const runs = !node.richTextHTML && !attrs.inlineTextStyle ? validateInlineRuns(node.reference?.inlineRuns,textWithLayerBreaks(node)) : null
-    const content = runs ? runs.map(r=>Object.keys(r.style).length ? '<span style={'+JSON.stringify(r.style)+'}>{'+JSON.stringify(r.text)+'}</span>' : '{'+JSON.stringify(r.text)+'}').join('') : typeof node.text === 'string'
+    const rich=attrs.editorRichText as EditorRichText|undefined
+    const sourceStyle=(v:Record<string,unknown>)=>{
+      const result:Record<string,string>={}
+      const put=(k:string,x:string|null|undefined)=>{if(x!=null)result[k]=x}
+      if(typeof v.fontName==='string')put('fontFamily',v.fontName)
+      put('fontSize',cssLen(v.fontSize));put('fontWeight',cssVal(v.fontWeight))
+      if(typeof v.fontStyle==='string'&&/^(normal|italic|oblique)$/.test(v.fontStyle))put('fontStyle',v.fontStyle)
+      put('letterSpacing',cssLen(v.letterSpacing))
+      put('lineHeight',cssLen(v.lineHeight))
+      put('color',options.resolveCapturedColor?.(v.textColor,node,'richTextRun.color')??cssColor(v.textColor))
+      if(typeof v.textDecoration==='string'&&/^(none|underline|line-through|overline)$/.test(v.textDecoration))put('textDecorationLine',v.textDecoration)
+      if(typeof v.textTransform==='string'&&/^(none|uppercase|lowercase|capitalize)$/.test(v.textTransform))put('textTransform',v.textTransform)
+      return result
+    }
+    const richContent=rich&&rich.blocks.length===1&&rich.blocks[0].runs.length>1?rich.blocks[0].runs.map(r=>{
+      if(r.lineBreak)return '<br />'
+      const style=sourceStyle(r.style??{})
+      return '<span style={'+JSON.stringify(style)+'}>{'+JSON.stringify(r.text??'')+'}</span>'
+    }).join(''):null
+    const content = richContent??(runs ? runs.map(r=>Object.keys(r.style).length ? '<span style={'+JSON.stringify(r.style)+'}>{'+JSON.stringify(r.text)+'}</span>' : '{'+JSON.stringify(r.text)+'}').join('') : typeof node.text === 'string'
       ? `{${JSON.stringify(textWithLayerBreaks(node))}}`
-      : (node.children || []).map(child => render(child, depth + 1, stackAxis(node), node, ownField)).join('\n')
+      : (node.children || []).map(child => render(child, depth + 1, stackAxis(node), node, ownField)).join('\n'))
     const inlineSvg = svgMarkup(node) || options.resolveCapturedIcon?.(node) || null
     if (inlineSvg) {
       const svgSource = '/' + svgPath(inlineSvg)
