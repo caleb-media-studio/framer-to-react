@@ -33,20 +33,20 @@ bun run dev
 Abre el complemento local mediante las herramientas de desarrollo de Framer. Exporta el diseño con **Raw design archive only** activado. Después:
 
 ```sh
-bun bin/framer-to-react.mjs compile design.zip --out react-app
+bun bin/framer-to-react.ts compile design.zip --out react-app
 cd react-app
 bun install
 bun run build
 bun run dev
 ```
 
-Con npm, usa `npm ci`, `node bin/framer-to-react.mjs compile design.zip --out react-app` y, en la aplicación generada, `npm install`, `npm run build` y `npm run dev`.
+Con npm, usa `npm ci`, `node bin/framer-to-react.ts compile design.zip --out react-app` y, en la aplicación generada, `npm install`, `npm run build` y `npm run dev`.
 
 La salida incluye `src/components/`, `src/layouts/`, `src/pages/` y `public/assets/`. Los archivos TSX originales se importan como componentes, y las rutas se cargan cuando se necesitan. El compilador no modifica el archivo original.
 
 ## Verificación y límites
 
-La compilación correcta no implica fidelidad visual completa. Los recursos inaccesibles, las interacciones no implementadas y las referencias ambiguas se registran como limitaciones. Consulta `compile-report.json` y los informes de reutilización. Solo utiliza proyectos y referencias que tengas autorización para acceder. El núcleo y la CLI están en TypeScript estricto; parte del renderizador sigue en JavaScript.
+La compilación correcta no implica fidelidad visual completa. Los recursos inaccesibles, las interacciones no implementadas y las referencias ambiguas se registran como limitaciones. Consulta `compile-report.json` y los informes de reutilización. Solo utiliza proyectos y referencias que tengas autorización para acceder. Todo el código ejecutable propio, incluido el complemento, el compilador, las herramientas de verificación y las pruebas, utiliza TypeScript estricto.
 
 [Especificación del archivo](../archive-v5.md) · [Verificación](../../verification/FIDELITY_GATE.md) · [Contribuir](../../CONTRIBUTING.md) · [Licencia MIT](../../LICENSE).
 

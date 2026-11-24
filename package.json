@@ -6,14 +6,14 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "test": "node --test tests/*.test.mjs verification/*.test.ts",
+    "test": "node --test tests/*.test.ts verification/*.test.ts",
     "cli": "node scripts/cli.ts",
     "compile": "node scripts/cli.ts compile",
     "typecheck": "tsc --noEmit",
     "verify:visual": "node verification/fidelity-gate.ts",
-    "test:bun": "bun test tests/*.test.mjs verification/*.test.ts",
+    "test:bun": "bun test tests/*.test.ts verification/*.test.ts",
     "capture:reference": "node verification/evidence-sidecar.ts",
-    "capture:vectors": "node verification/vector-evidence.mjs"
+    "capture:vectors": "node verification/vector-evidence.ts"
   },
   "dependencies": {
     "@framer/plugin": "latest",
@@ -55,6 +55,6 @@
   },
   "packageManager": "bun@1.4.5",
   "bin": {
-    "framer-to-react": "bin/framer-to-react.mjs"
+    "framer-to-react": "bin/framer-to-react.ts"
   }
 }

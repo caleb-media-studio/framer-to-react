@@ -33,20 +33,20 @@ bun run dev
 在 Framer 的插件开发环境中打开本地插件，保持 **Raw design archive only** 选项启用，下载设计 ZIP。
 
 ```sh
-bun bin/framer-to-react.mjs compile design.zip --out react-app
+bun bin/framer-to-react.ts compile design.zip --out react-app
 cd react-app
 bun install
 bun run build
 bun run dev
 ```
 
-使用 npm 时，在工具仓库运行 `npm ci` 和 `node bin/framer-to-react.mjs compile design.zip --out react-app`，再进入生成的应用运行 `npm install`、`npm run build` 和 `npm run dev`。
+使用 npm 时，在工具仓库运行 `npm ci` 和 `node bin/framer-to-react.ts compile design.zip --out react-app`，再进入生成的应用运行 `npm install`、`npm run build` 和 `npm run dev`。
 
 输出包含 `src/components/`、`src/layouts/`、`src/pages/` 和 `public/assets/`。原始 TSX 代码作为组件导入，而不是转换为静态图片。各路由按需加载。编译不会修改输入档案。
 
 ## 保真度与限制
 
-构建成功并不意味着视觉效果完全一致。无法获取的资源、尚未支持的交互和不确定的参考数据都会被记录，不会被视为验证通过。请查看 `compile-report.json` 和组件复用报告。仅处理有权访问的项目。编译器入口与 CLI 使用严格 TypeScript，部分底层渲染模块仍使用 JavaScript。
+构建成功并不意味着视觉效果完全一致。无法获取的资源、尚未支持的交互和不确定的参考数据都会被记录，不会被视为验证通过。请查看 `compile-report.json` 和组件复用报告。仅处理有权访问的项目。插件、编译器、渲染模块、验证工具和测试等所有第一方可执行源码均使用严格 TypeScript。
 
 [档案规范](../archive-v5.md) · [保真度验证](../../verification/FIDELITY_GATE.md) · [贡献指南](../../CONTRIBUTING.md) · [MIT 许可证](../../LICENSE)。
 
