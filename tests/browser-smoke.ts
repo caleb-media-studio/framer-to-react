@@ -1,5 +1,5 @@
 import {collectLive} from '../verification/evidence-sidecar.ts'
-import {collectPreview} from '../verification/fidelity-gate.ts'
+import {collectPreview,diffPngs} from '../verification/fidelity-gate.ts'
 import {compareStyle} from '../verification/fidelity-compare.ts'
 import {collectRenderAudit,compareRenderAudit} from '../verification/render-audit.ts'
 import assert from 'node:assert/strict'
@@ -105,6 +105,27 @@ try{
  const [mixed]=await auditPage.evaluate(collectLive,props)
  assert.equal(mixed.style.fontSize,'16px')
  assert.deepEqual(mixed.inlineRuns?.map(r=>[r.text,r.style.fontSize??mixed.style.fontSize]),[['Small','12px'],['Large','16px']])
+ // Source stability is independent of candidate fidelity. Only changes within
+ // the known platform badge rectangle are allowed in this diagnostic.
+ const image=await auditPage.evaluate(()=>{
+  const c=document.createElement('canvas');c.width=8;c.height=8;
+  const ctx=c.getContext('2d')!;ctx.fillStyle='black';ctx.fillRect(0,0,8,8);
+  const a=c.toDataURL().split(',')[1];
+  ctx.fillStyle='white';ctx.fillRect(1,1,2,2);
+  const badgeOnly=c.toDataURL().split(',')[1];
+  ctx.fillRect(7,7,1,1);
+  return {a,badgeOnly,changed:c.toDataURL().split(',')[1]}
+ })
+ const bounds=[{x:1,y:1,width:2,height:2}]
+ const badgeDiff=await auditPage.evaluate(diffPngs,{a:image.a,b:image.badgeOnly,channel:32,badgeBounds:bounds})
+ assert.equal(badgeDiff.exactDiffering,4)
+ assert.equal(badgeDiff.outsideBadgeDiffering,0)
+ const unstable=await auditPage.evaluate(diffPngs,{a:image.a,b:image.changed,channel:32,badgeBounds:bounds})
+ assert.equal(unstable.exactDiffering,5)
+ assert.equal(unstable.outsideBadgeDiffering,1)
+ const full=await auditPage.evaluate(diffPngs,{a:image.a,b:image.changed,channel:32})
+ assert.equal(full.exactDiffering,5)
+ assert.equal(full.outsideBadgeDiffering,5)
  await auditPage.close()
  console.log('Browser smoke passed: lazy routes, original named TSX component and controls, editable field, history, responsive variant, direct URL.')
 }finally{await browser.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}

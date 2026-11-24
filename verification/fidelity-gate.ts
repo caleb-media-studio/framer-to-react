@@ -40,7 +40,7 @@ export function collectPreview(args: { ids: string[]; props: string[] }): Record
 }
 
 // Runs in a blank page: decodes both PNGs and counts pixels whose max channel delta exceeds the threshold.
-async function diffPngs(args: { a: string; b: string; channel: number }): Promise<{ differing: number; total: number; heights: [number, number]; exactDiffering:number }> {
+export async function diffPngs(args: { a: string; b: string; channel: number; badgeBounds?: Box[] }): Promise<{ differing: number; total: number; heights: [number, number]; exactDiffering:number; sameDimensions:boolean; outsideBadgeDiffering:number }> {
   const load = async (b64: string): Promise<ImageBitmap> => createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
   const [ia, ib] = await Promise.all([load(args.a), load(args.b)]);
   const w = Math.max(ia.width, ib.width), h = Math.max(ia.height, ib.height);
@@ -50,12 +50,18 @@ async function diffPngs(args: { a: string; b: string; channel: number }): Promis
     return ctx.getImageData(0, 0, w, h).data;
   };
   const pa = pixels(ia), pb = pixels(ib);
-  let differing = 0, exactDiffering = 0;
+  let differing = 0, exactDiffering = 0, outsideBadgeDiffering = 0;
+  const badgeBounds=args.badgeBounds??[];
   for (let i = 0; i < pa.length; i += 4) {
-    if(pa[i]!==pb[i]||pa[i+1]!==pb[i+1]||pa[i+2]!==pb[i+2]||pa[i+3]!==pb[i+3])exactDiffering++;
+    if(pa[i]!==pb[i]||pa[i+1]!==pb[i+1]||pa[i+2]!==pb[i+2]||pa[i+3]!==pb[i+3]){
+      exactDiffering++;
+      // Diagnostic only: never subtract these pixels from the candidate comparison.
+      const x=(i/4)%w,y=Math.floor(i/4/w);
+      if(!badgeBounds.some(b=>x>=Math.floor(b.x)&&x<Math.ceil(b.x+b.width)&&y>=Math.floor(b.y)&&y<Math.ceil(b.y+b.height)))outsideBadgeDiffering++;
+    }
     if (Math.abs(pa[i] - pb[i]) > args.channel || Math.abs(pa[i + 1] - pb[i + 1]) > args.channel || Math.abs(pa[i + 2] - pb[i + 2]) > args.channel) differing++;
   }
-  return { differing, exactDiffering, total: w * h, heights: [ia.height, ib.height] };
+  return { differing, exactDiffering, total: w * h, heights: [ia.height, ib.height], sameDimensions:ia.width===ib.width&&ia.height===ib.height, outsideBadgeDiffering };
 }
 
 /**
@@ -148,7 +154,13 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
   const blank = await browser.newPage();
   const d = await blank.evaluate(diffPngs, { a: l.buf.toString('base64'), b: p.buf.toString('base64'), channel: TOL.pixelChannel });
   const raw=l.rawBuf?await blank.evaluate(diffPngs,{a:l.rawBuf.toString('base64'),b:p.buf.toString('base64'),channel:TOL.pixelChannel}):null;
+  // Removing the exact platform anchor must not change any other rendered pixel.
+  // Keep the full original and filtered images and their full candidate metrics
+  // even when the source changes between captures; instability never counts as a pass.
+  const sourceStability=l.rawBuf?await blank.evaluate(diffPngs,{a:l.rawBuf.toString('base64'),b:l.buf.toString('base64'),channel:TOL.pixelChannel,badgeBounds:l.platformBadge?.bounds??[]}):null;
   await blank.close();
+  result.sourceStability=sourceStability;
+  if(!sourceStability||!sourceStability.sameDimensions||sourceStability.outsideBadgeDiffering!==0)unverified.push('source screenshot changed outside authorized platform badge bounds');
   result.platformBadge=l.platformBadge;
   if(raw)result.unfilteredPixels={differing:raw.differing,exactDiffering:raw.exactDiffering,total:raw.total,ratio:raw.differing/raw.total,exactRatio:raw.exactDiffering/raw.total};
   const v = pixelVerdict(d.differing, d.total, [l.docH, p.docH]);
@@ -156,6 +168,7 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
   result.pixelRatio = Math.round(v.ratio * 1e5) / 1e5;
   result.pixelDiffering=d.differing;
   result.pixelExactDiffering=d.exactDiffering;
+  result.pixelDimensionsEqual=d.sameDimensions;
   result.pixelTotal=d.total;
   result.pixelExactRatio=d.exactDiffering/d.total;
   if (!v.pass) mismatches.push({ nodeId: '(page)', name: 'full-page screenshot', fields: [{ field: 'pixels', expected: `≤${TOL.pixelRatio}`, actual: result.pixelRatio as number }, { field: 'docH', expected: l.docH, actual: p.docH }] });
@@ -201,7 +214,7 @@ async function main(): Promise<void> {
   try { await Promise.all(Array.from({ length: Number(flag('--workers') ?? 3) }, worker)); } finally { await browser.close(); }
   results.sort((a, b) => String(a.route).localeCompare(String(b.route)) || Number(a.width) - Number(b.width));
   const strictPixels=process.argv.includes('--strict-pixels');
-  const exactPixelCases=results.filter(r=>r.pixelExactDiffering===0).length;
+  const exactPixelCases=results.filter(r=>r.pixelExactDiffering===0&&r.pixelDimensionsEqual===true).length;
   const totals = { cases: results.length, passing: results.filter((r) => r.mismatchLayers === 0 && r.unverifiedCount === 0).length, mismatchLayers: results.reduce((s, r) => s + Number(r.mismatchLayers), 0), unverified: results.reduce((s, r) => s + Number(r.unverifiedCount), 0) };
   const captureComplete=!!manifest && !manifest.failures?.length && (manifest.requestedPages??manifest.pages.length)===manifest.pages.length;
   const passed = gatePassed(totals, cases.length) && (!fullScope||captureComplete) && (!strictPixels||exactPixelCases===cases.length);
