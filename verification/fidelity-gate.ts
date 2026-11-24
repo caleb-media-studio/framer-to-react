@@ -58,17 +58,39 @@ async function diffPngs(args: { a: string; b: string; channel: number }): Promis
   return { differing, exactDiffering, total: w * h, heights: [ia.height, ib.height] };
 }
 
-async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; error?: string }> {
+/**
+ * Exclude only Framer's injected, out-of-flow platform branding from design fidelity.
+ * Run in the isolated source test page, never modify the editor or published site.
+ * Do not hide author-created links, other fixed elements, or arbitrary pixel regions.
+ */
+export function excludePlatformBadge(): {removed:number;bounds:{x:number;y:number;width:number;height:number}[]} {
+  const container=document.getElementById('__framer-badge-container');
+  if(!container||container.parentElement!==document.body||getComputedStyle(container).position!=='fixed'||getComputedStyle(container).pointerEvents!=='none')return {removed:0,bounds:[]};
+  const bounds:{x:number;y:number;width:number;height:number}[]=[];
+  for(const badge of Array.from(container.children)){
+    if(!(badge instanceof HTMLAnchorElement)||!badge.classList.contains('__framer-badge')||badge.getAttribute('data-nosnippet')!=='true')continue;
+    const target=new URL(badge.href,location.href);
+    if(target.protocol!=='https:'||!['framer.com','www.framer.com'].includes(target.hostname)||target.pathname!=='/')continue;
+    const r=badge.getBoundingClientRect();
+    bounds.push({x:r.x,y:r.y,width:r.width,height:r.height});
+    badge.style.setProperty('display','none','important');
+  }
+  return {removed:bounds.length,bounds};
+}
+
+async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; rawBuf?:Buffer; platformBadge?:ReturnType<typeof excludePlatformBadge>; error?: string }> {
   const page = await browser.newPage({ viewport: { width, height: VIEWPORT_HEIGHT }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
   try {
     const res = await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
     await page.evaluate(()=>document.fonts.ready);
     await page.waitForTimeout(SETTLE_MS);
     const responseSha256=res?.ok()?createHash('sha256').update(await res.body()).digest('hex'):undefined;
+    const rawBuf=side==='source'?await page.screenshot({path:file.replace(/\.png$/,'.original.png'),fullPage:true}):undefined;
+    const platformBadge=side==='source'?await page.evaluate(excludePlatformBadge):undefined;
     const docH = await page.evaluate(() => document.documentElement.scrollHeight);
     const audit = await page.evaluate(collectRenderAudit,side);
     const buf = await page.screenshot({ path: file, fullPage: true });
-    return { audit,buf, docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
+    return { audit,buf,rawBuf,platformBadge,docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
   } finally { await page.close(); }
 }
 
@@ -125,7 +147,10 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
   mismatches.push(...audit.findings);
   const blank = await browser.newPage();
   const d = await blank.evaluate(diffPngs, { a: l.buf.toString('base64'), b: p.buf.toString('base64'), channel: TOL.pixelChannel });
+  const raw=l.rawBuf?await blank.evaluate(diffPngs,{a:l.rawBuf.toString('base64'),b:p.buf.toString('base64'),channel:TOL.pixelChannel}):null;
   await blank.close();
+  result.platformBadge=l.platformBadge;
+  if(raw)result.unfilteredPixels={differing:raw.differing,exactDiffering:raw.exactDiffering,total:raw.total,ratio:raw.differing/raw.total,exactRatio:raw.exactDiffering/raw.total};
   const v = pixelVerdict(d.differing, d.total, [l.docH, p.docH]);
   result.docH = [l.docH, p.docH];
   result.pixelRatio = Math.round(v.ratio * 1e5) / 1e5;
