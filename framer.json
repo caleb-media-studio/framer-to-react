@@ -1,0 +1,8 @@
+{
+  "id": "fta001",
+  "name": "Framer to Agent",
+  "modes": [
+    "canvas"
+  ],
+  "icon": "/icon.svg"
+}

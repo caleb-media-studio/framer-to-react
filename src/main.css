@@ -1,0 +1,51 @@
+:root { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: #101116; color: #f5f6fa; margin: 0; }
+main { padding: 16px; }
+.header { display: flex; align-items: center; gap: 12px; margin-bottom: 13px; }
+.logo { display: grid; place-items: center; height: 40px; width: 40px; background: #263446; border: 1px solid #4b6b86; color: #9edaff; border-radius: 10px; font-size: 20px; font-weight: 800; }
+h1 { font-size: 16px; margin: 0 0 3px; }
+p { margin: 0; }
+.header p, .hint, .footnote { color: #9aa3b1; font-size: 11px; line-height: 1.55; }
+.panel { background: #1b1d26; border: 1px solid #363947; border-radius: 12px; padding: 12px; margin-bottom: 9px; }
+.section-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.eyebrow { font-size: 9px; font-weight: 800; letter-spacing: .12em; color: #9ea6b4; margin-bottom: 7px; }
+#scope, #selection { font-size: 13px; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; margin-bottom: 5px; }
+.tree { border-radius: 8px; border: 1px solid #373b49; max-height: 214px; overflow: auto; margin-bottom: 8px; background: #13151d; padding: 4px 0; }
+.tree-row { display: flex; align-items: center; min-height: 29px; padding-right: 5px; gap: 5px; border-radius: 6px; }
+.tree-row:hover { background: #272c37; }
+.tree-row.chosen { background: #223b56; outline: 1px solid #366d9a; }
+.tree-button { width: auto; flex: 1; text-align: left; min-width: 0; border: 0; background: transparent; color: #e7eaf0; font-size: 12px; font-weight: 550; padding: 5px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-button:hover { background: transparent; }
+.page-row .tree-button { color: #b8c3d0; }
+.count { background: #2e3442; color: #bfcbd7; border-radius: 10px; min-width: 22px; text-align: center; font-size: 10px; padding: 2px 4px; }
+.quick-export { flex: none; width: 26px; padding: 2px; height: 24px; border: 1px solid transparent; background: transparent; color: #92b7d2; font-size: 17px; border-radius: 5px; }
+.quick-export:hover { border-color: #42668b; background: #30445b; }
+button { font-family: inherit; font-size: 12px; font-weight: 650; border-radius: 8px; padding: 10px; cursor: pointer; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.primary { display: block; width: 100%; border: 0; background: #50afff; color: #07121e; margin: 0 0 9px; }
+button.primary:not(:disabled):hover { background: #87c9ff; }
+button.secondary { background: #292c37; border: 1px solid #424654; color: #eef0f7; }
+button.small { width: auto; font-size: 10px; padding: 5px 8px; }
+#copy, #export-selection { display: block; width: 100%; }
+.selection-panel { margin: 0 0 9px; }
+#status { font-size: 11px; margin: 10px 0; color: #abb5c5; line-height: 1.5; }
+#status.error { color: #fca5a5; }
+.warnings { margin: 10px 0; font-size: 11px; color: #f2cb91; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 100px; overflow: auto; }
+.footnote { margin-top: 12px; text-align: center; }
+
+/* Actionable diagnostic report. Thousands of component instances are summarized, not counted as errors. */
+.diagnostic-panel { border-color: #476077; }
+#diagnostic-summary { font-weight: 750; font-size: 12px; margin: 0 0 7px; line-height: 1.4; }
+#diagnostic-filter { color: #f5f6fa; background: #292c37; border: 1px solid #424654; border-radius: 7px; padding: 5px; font-size: 11px; }
+.diagnostic-list { max-height: 240px; overflow: auto; margin: 10px 0; }
+.diagnostic-item { border: 1px solid #414756; border-radius: 7px; margin: 5px 0; padding: 7px 9px; font-size: 11px; line-height: 1.5; }
+.diagnostic-item summary { cursor: pointer; font-weight: 700; }
+.diagnostic-item p { padding: 6px 0 0; }
+.diagnostic-item ul { margin: 6px 0 0; padding: 0 0 0 16px; overflow-wrap: anywhere; }
+.diagnostic-item li { margin: 3px 0; }
+.severity-error { border-left: 3px solid #f87171; }
+.severity-warning { border-left: 3px solid #fbbf24; }
+.severity-review { border-left: 3px solid #60a5fa; }
+.severity-info { border-left: 3px solid #9ca3af; }
+#copy-report { width: 100%; }

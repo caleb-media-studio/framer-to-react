@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Framer to Agent</title>
+  </head>
+  <body>
+    <main>
+      <div class="header"><div class="logo">{ }</div><div><h1>Framer to Agent</h1><p>Pages + saved components + assets → React + Tailwind + JSON</p></div></div>
+      <div class="panel">
+        <div class="section-heading"><span class="eyebrow">PAGE FOLDERS</span><button id="refresh" class="small secondary" type="button">↻ Scan pages</button></div>
+        <div id="folders" class="tree" role="group" aria-label="Page folder browser">Loading project pages...</div>
+        <p class="hint">Click a folder to choose it. Use ↧ or right-click a row to export directly within this plugin.</p>
+      </div>
+      <div class="panel scope-panel">
+        <p class="eyebrow">EXPORT SCOPE</p>
+        <p id="scope">Entire project</p>
+        <p id="summary" class="hint">Scanning...</p>
+      </div>
+      <label class="hint"><input id="raw-only" type="checkbox" checked> Raw design archive only (compile separately)</label>
+      <button id="export" class="primary" type="button" disabled>Export folder + nested pages (.zip)</button>
+      <div class="panel selection-panel">
+        <p class="eyebrow">OR EXPORT A CANVAS SELECTION</p>
+        <p id="selection">Reading selection...</p>
+        <button id="export-selection" class="secondary" type="button" disabled>Export selected layers</button>
+      </div>
+      <button id="copy" class="secondary" type="button" disabled>Copy last agent instructions</button>
+      <section id="diagnostic-panel" class="panel diagnostic-panel" hidden aria-label="Export diagnostic report">
+        <div class="section-heading"><span class="eyebrow">EXPORT DIAGNOSTICS</span>
+          <select id="diagnostic-filter" aria-label="Filter export diagnostics">
+            <option value="all">All</option><option value="error">Errors</option>
+            <option value="warning">Warnings</option><option value="review">Review</option>
+            <option value="info">Info</option>
+          </select>
+        </div>
+        <p id="diagnostic-summary" role="status"></p>
+        <p class="hint">Click a finding for page/layer names and exact IDs. Full details in diagnostics.json inside the ZIP.</p>
+        <div id="diagnostic-list" class="diagnostic-list"></div>
+        <button id="copy-report" class="secondary" type="button" disabled>Copy diagnostic report</button>
+      </section>
+      <p id="status" role="status">No backend or API key. All processing happens inside the plugin.</p>
+      <div id="warnings" class="warnings" hidden></div>
+      <p class="footnote">Pages, reused components, code files, SVG/images, color/text styles, responsive breakpoints an agent handoff, and actionable diagnostic report. Some Framer assets and variables may be API-limited.</p>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
