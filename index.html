@@ -7,7 +7,7 @@
   </head>
   <body>
     <main>
-      <div class="header"><div class="logo">{ }</div><div><h1>Framer to React</h1><p>Pages + saved components + assets → React + Tailwind + JSON</p></div></div>
+      <div class="header"><div class="logo">{ }</div><div><h1>Framer to React</h1><p>Immutable design capture · CJSON/1</p></div></div>
       <div class="panel">
         <div class="section-heading"><span class="eyebrow">PAGE FOLDERS</span><button id="refresh" class="small secondary" type="button">↻ Scan pages</button></div>
         <div id="folders" class="tree" role="group" aria-label="Page folder browser">Loading project pages...</div>
@@ -20,6 +20,7 @@
       </div>
       <label class="hint"><input id="compressed" type="checkbox" checked> Compress source JSON (CJSON + reference dictionary)</label>
       <p class="hint">Capture only. Framer may jump between pages while reading layers, fonts and assets. Compile the downloaded archive separately.</p>
+      <p id="compression-result" class="hint" hidden aria-live="polite"></p>
       <button id="export" class="primary" type="button" disabled>Export folder + nested pages (.zip)</button>
       <div class="panel selection-panel">
         <p class="eyebrow">OR EXPORT A CANVAS SELECTION</p>

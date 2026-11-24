@@ -69,7 +69,7 @@ export async function prepareOfficialLayouts(doc:OfficialDocument):Promise<Layou
  return {format:'framer-to-agent/layout-source-v1',bindings:doc.pages,templates,assets,issues}
 }
 
-export function layoutModules(source:LayoutSource|null,pages:PageRecord[]){
+export function layoutModules(source:LayoutSource|null,pages:PageRecord[],resolveCapturedIcon?:(node:DesignNode)=>string|null){
  const files:ArchiveFiles={},assignments=new Map<string,LayoutTemplate>(),issues=[...(source?.issues||[])]
  if(!source)return {files,assignments,issues}
  if(source.format!=='framer-to-agent/layout-source-v1')throw Error('Unsupported normalized layout source')
@@ -84,7 +84,7 @@ export function layoutModules(source:LayoutSource|null,pages:PageRecord[]){
  }
  for(const t of new Set(assignments.values()))for(const v of t.variants){
   const path='preview/src/layouts/templates/'+ident(t.id)+'/'+ident(v.id)+'/Component.tsx'
-  const bundle=generateBundle({roots:[v.root],pagePath:'layout:'+t.id},{layoutSlot:true})
+  const bundle=generateBundle({roots:[v.root],pagePath:'layout:'+t.id},{layoutSlot:true,resolveCapturedIcon})
   files[path]=bundle.tsx
   files[path.replace('Component.tsx','component.css')]=bundle.css
  }

@@ -118,6 +118,8 @@ export async function compileCapturedArchive(files:Readonly<ArchiveFiles>){
   const snapshot=JSON.parse(value) as Snapshot
   for(const root of snapshot.roots||[])visit(root)
  }
+ const layouts=parseCapturedLayouts(decoded)
+ for(const template of layouts?.templates??[])for(const variant of template.variants)visit(variant.root)
  const icons=new Map<string,string>()
  for(const [key,node] of wanted){
   const a=node.attributes!
