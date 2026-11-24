@@ -65,6 +65,27 @@ function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[] {
         }
         return read(block);
       })() : undefined;
+      // Capture actual inline typography, not HTML or guessed styles. Only a single block
+      // made of plain text and inline formatting elements can be safely reconstructed.
+      const inlineRuns = singleBlock && block.children.length && !block.querySelector('a,img,svg,button') &&
+        [...block.querySelectorAll('*')].every(n => /^(SPAN|B|STRONG|I|EM|U|S|BR)$/.test(n.tagName) && getComputedStyle(n).display === 'inline')
+        ? (() => {
+          const fields = ['fontSize','lineHeight','fontWeight','letterSpacing','fontStyle','color'] as const;
+          const runs: {text:string;style:Record<string,string>}[] = [];
+          const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+            if (n.nodeType !== Node.TEXT_NODE && !(n instanceof HTMLBRElement)) continue;
+            const text = n instanceof HTMLBRElement ? '\n' : n.textContent ?? '';
+            if (!text || !n.parentElement) continue;
+            const css = getComputedStyle(n.parentElement);
+            const delta: Record<string,string> = {};
+            for (const k of fields) if (css[k] !== cs[k]) delta[k] = css[k];
+            const last = runs.at(-1);
+            if (last && JSON.stringify(last.style) === JSON.stringify(delta)) last.text += text;
+            else runs.push({text,style:delta});
+          }
+          return runs.some(r=>Object.keys(r.style).length) ? runs : undefined;
+        })() : undefined;
       const siblingText = [...(el.parentElement?.children ?? [])].filter(s=>s!==el && s.getAttribute('data-framer-component-type')==='RichTextContainer' && s.checkVisibility() && s.textContent?.trim())
         .map(s=>JSON.stringify([s.getAttribute('data-framer-name')??'',(s.textContent??'').normalize('NFC').replace(/\s+/g,' ').trim()]));
       return {
@@ -76,6 +97,7 @@ function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[] {
         bbox: { x: r.x + scrollX, y: r.y + scrollY, width: r.width, height: r.height },
         domPath: path(el),
         ...(hardBreakText === undefined ? {} : {hardBreakText}),
+        ...(inlineRuns === undefined ? {} : {inlineRuns}),
       };
     });
 }
@@ -115,7 +137,7 @@ async function main(): Promise<void> {
         const result = frame ? matchTexts(archive, live) : { matches: [], unmatchedArchive: [], unmatchedLive: live.map((l) => l.index) };
         const evidence = result.matches.map((m) => {
           const l = live[m.liveIndex];
-          return { nodeId: m.nodeId, breakpointId: frame?.id, confidence: m.confidence, method: m.method, framerName: l.name, style: l.style, bbox: l.bbox, domPath: l.domPath, ...(l.hardBreakText === undefined ? {} : {hardBreakText: l.hardBreakText}) };
+          return { nodeId: m.nodeId, breakpointId: frame?.id, confidence: m.confidence, method: m.method, framerName: l.name, style: l.style, bbox: l.bbox, domPath: l.domPath, ...(l.hardBreakText === undefined ? {} : {hardBreakText: l.hardBreakText}), ...(l.inlineRuns === undefined ? {} : {inlineRuns:l.inlineRuns}) };
         });
         const provenance = {
           source: 'published-site', url, viewport: { width, height: VIEWPORT_HEIGHT }, capturedAt: new Date().toISOString(), userAgent,

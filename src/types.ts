@@ -29,10 +29,11 @@ export interface PageRecord { warnings?:string[];nodeCount?:number;type?:string;
 export interface Manifest { format: string; pages?: PageRecord[]; projectName?: string; requestedPages?: number; failures?: unknown[]; [extra:string]: unknown }
 export interface Issue {stage: string; severity: string; message?: string; route?: string; code?: string; count?: number;nodeId?:string}
 export interface Provenance {source?:string; url?:string; viewport?:{width?:number;height?:number}; capturedAt?:string; responseSha256?:string; [extra:string]:unknown}
-export interface TextEvidence {nodeId:string;confidence:string;framerName?:string;method?:string;domPath?:string;style?:Record<string,string>;hardBreakText?:string;vector?:unknown;[extra:string]:unknown}
+export interface InlineTextRun {text:string;style:Record<string,string>}
+export interface TextEvidence {nodeId:string;confidence:string;framerName?:string;method?:string;domPath?:string;style?:Record<string,string>;hardBreakText?:string;inlineRuns?:InlineTextRun[];vector?:unknown;[extra:string]:unknown}
 export interface ReferenceDocument {breakpointId?:string|null;provenance?:Provenance;vectorProvenance?:Provenance;evidence?:TextEvidence[];vectors?:TextEvidence[];unmatchedArchive?:string[];unmatchedLive?:{name?:string;text?:string}[];[extra:string]:unknown}
 export interface Evidence {route:string;doc:ReferenceDocument;file?:string}
-export interface NodeReference {textStyle?:Record<string,string>;tag?:string;hardBreakText?:string;vector?:unknown;provenance?:Provenance}
+export interface NodeReference {textStyle?:Record<string,string>;tag?:string;hardBreakText?:string;inlineRuns?:InlineTextRun[];vector?:unknown;provenance?:Provenance}
 export interface LayoutVariant {id:string;width:number;mediaQuery?:unknown;root:DesignNode}
 export interface LayoutTemplate {id:string;name?:string;variants:LayoutVariant[]}
 export interface LayoutBinding {id:string;path:string;layout?:string|null;controls?:unknown}

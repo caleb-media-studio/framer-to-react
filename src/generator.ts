@@ -1,3 +1,4 @@
+import {validateInlineRuns} from './inline-text.ts'
 import type {Attributes,DesignNode,Snapshot,Axis,CSSProperties,RenderOptions,CodeImport,ReusableBlock,NativeField} from './types.ts'
 import {svgMarkup, svgPath, inheritsIconColor} from './vectors.ts'
 /** Deterministic first-pass TSX / Tailwind / CSS generator from canvas snapshots. */
@@ -344,7 +345,8 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
       if (expanded) return renderNode(expanded, depth, parentAxis, parent, field)
     }
     const ownField = nativeField(node,parent)
-    const content = typeof node.text === 'string'
+    const runs = !node.richTextHTML && !attrs.inlineTextStyle ? validateInlineRuns(node.reference?.inlineRuns,textWithLayerBreaks(node)) : null
+    const content = runs ? runs.map(r=>Object.keys(r.style).length ? '<span style={'+JSON.stringify(r.style)+'}>{'+JSON.stringify(r.text)+'}</span>' : '{'+JSON.stringify(r.text)+'}').join('') : typeof node.text === 'string'
       ? `{${JSON.stringify(textWithLayerBreaks(node))}}`
       : (node.children || []).map(child => render(child, depth + 1, stackAxis(node), node, ownField)).join('\n')
     const inlineSvg = svgMarkup(node)

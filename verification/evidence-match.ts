@@ -1,6 +1,8 @@
 // Matches archive TextNodes to text containers observed on the published site, so published computed styles can be
 // attached as opt-in *evidence* for fields the Plugin API did not capture. Never produces a value for an unmatched node.
 
+import type {InlineTextRun} from "../src/types.ts";
+
 export type Confidence = 'high' | 'medium' | 'low';
 
 export interface ArchiveText {
@@ -22,6 +24,7 @@ export interface LiveText {
   bbox: { x: number; y: number; width: number; height: number };
   domPath: string;
   hardBreakText?: string;
+  inlineRuns?: InlineTextRun[];
   siblingText?: string[];
 }
 
