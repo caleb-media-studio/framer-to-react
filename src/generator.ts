@@ -333,7 +333,7 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     const edgeBorders:CSSProperties={}
     for(const side of ['Top','Right','Bottom','Left']){
       const value=attrs['border'+side]
-      if(typeof value==='string'&&/^\d+(?:\.\d+)?px (solid|dashed|dotted|double) (#[0-9a-f]{3,8}|rgba?\([\d.,%\s]+\))$/i.test(value))edgeBorders['border-'+side.toLowerCase()]=value
+      if(typeof value==='string'){const match=/^(\d+(?:\.\d+)?px) (solid|dashed|dotted|double) (.+)$/.exec(value);if(match){const color=options.resolveCapturedColor?.(match[3],node,'border'+side)??cssColor(match[3]);if(color)edgeBorders['border-'+side.toLowerCase()]=match[1]+' '+match[2]+' '+color}}
     }
     const overlayBorder = localCss.border
     if ((overlayBorder||Object.keys(edgeBorders).length) && node.kind === 'FrameNode') {
@@ -393,7 +393,7 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     }
     let tag = typeof node.text === 'string' ? 'p' : 'div'
     if (/Heading|Title|H1/i.test(attrs.name || '') && typeof node.text === 'string') tag = 'h2'
-    if (typeof node.text === 'string' && /^(h[1-6]|p)$/.test(node.reference?.tag || '')) tag = node.reference!.tag!
+    if (typeof node.text === 'string' && /^(h[1-6]|p)$/.test(attrs.tag || node.reference?.tag || '')) tag = attrs.tag || node.reference!.tag!
     const link = safeLink(attrs.link)
     if (link) tag = 'a'
     const props = [`${classAttr}`]

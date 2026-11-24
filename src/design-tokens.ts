@@ -29,6 +29,8 @@ export function createDesignTokens(source:Readonly<ArchiveFiles>){
  }
  const resolve:ColorResolver=(value,node,field)=>{
   const v=record(value)
+  const explicit=typeof value==='string'?/^var\(--token-([A-Za-z0-9_-]+)\)$/.exec(value)?.[1]:undefined
+  if(explicit){const t=byId.get(explicit);if(t){if(node&&field)references.push({id:explicit,nodeId:node.id,field});return 'var(--framer-'+t.token+')'}unknown.add(explicit);return null}
   if(v&&typeof v.id==='string'){
    const t=byId.get(v.id)
    if(t){if(node&&field)references.push({id:v.id,nodeId:node.id,field});return 'var(--framer-'+t.token+')'}

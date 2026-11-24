@@ -5,7 +5,7 @@ export interface OfficialDocument {format:string;templates:(Omit<OfficialNode,'t
 import {generateBundle} from './generator.ts'
 import {svgMarkup,svgPath,safeSvg} from './vectors.ts'
 import {relativeModule} from './reuse.ts'
-import {resolveIcon} from './icon-resolver.ts'
+import {resolveExactIcon} from './icon-resolver.ts'
 
 const walk=(n:OfficialNode,fn:(n:OfficialNode)=>void):void=>{fn(n);for(const c of n.children||[])walk(c,fn)}
 const ident=(id:unknown)=>String(id).replace(/[^a-zA-Z0-9_-]/g,'_')
@@ -32,7 +32,7 @@ export async function prepareOfficialLayouts(doc:OfficialDocument):Promise<Layou
   const out:DesignNode={id:n.id,kind,attributes:a,children:[]}
   if(kind==='TextNode'){
    out.text=String(n.text??'')
-   if(n.tag)out.reference={tag:n.tag}
+   if(n.tag)a.tag=n.tag
    const blocks=n.children||[]
    if(blocks.length>1||blocks.some(b=>(b.children||[]).length>1))issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Rich text run formatting requires verification'})
   }else if(/OverlayNode$/.test(kind)){
@@ -41,8 +41,8 @@ export async function prepareOfficialLayouts(doc:OfficialDocument):Promise<Layou
    a.visible=false;issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Source overlay interaction not yet implemented'})
   }else{
    if(kind==='IconNode'&&!a.svg){
-    const v=await resolveIcon(n.icon,n.name,n.set)
-    if(v?.svg){a.svg=v.svg;a.vectorOrigin=v.source;a.iconSourceInferred=Boolean(v.inferred);a.height=a.height==='fit-content'?a.width:a.height
+    const v=await resolveExactIcon(n.icon,n.set)
+    if(v?.svg){a.svg=v.svg;a.vectorOrigin=v.source;a.height=a.height==='fit-content'?a.width:a.height
       const paint=Object.entries(n).filter(([k,v])=>k.startsWith('$control__')&&typeof v==='string'&&/^#[0-9a-f]{3,8}$/i.test(v));if(paint.length===1)a.color=paint[0][1]
       issues.push({stage:'compile',severity:'review',nodeId:n.id,message:'Library icon needs rendered source verification'})
     }else issues.push({stage:'compile',severity:'warning',nodeId:n.id,message:'Unresolved icon source'})

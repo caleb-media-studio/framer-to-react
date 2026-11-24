@@ -1,8 +1,9 @@
+import {createEditorTextResolver} from './editor-source.ts'
 import {createDesignTokens,type ColorResolver} from './design-tokens.ts'
 import type {ArchiveFiles,PageRecord,DesignNode,Snapshot,LayoutTemplate,LayoutSource,CaptureDiagnostics,CodeFile,ReusableBlock,ReusableVariant,JsonObject} from './types.ts'
 import {textFile} from './types.ts'
 interface PageVariant {label:string;primary:boolean;width:string|number|null;componentPath:string;layoutPath:string|null}
-interface PreviewOptions {title?:string;diagnostics?:CaptureDiagnostics|null;layoutSource?:LayoutSource|null;resolveCapturedIcon?:(node:DesignNode)=>string|null}
+interface PreviewOptions {editorText?:ReturnType<typeof createEditorTextResolver>;title?:string;diagnostics?:CaptureDiagnostics|null;layoutSource?:LayoutSource|null;resolveCapturedIcon?:(node:DesignNode)=>string|null}
 interface RouteEntry {path:string;loader:string;variants:{label:string;primary:boolean;width:number}[]}
 import {layoutModules,selectLayoutVariant,layoutModulePath,contentWithinLayout} from './official-layouts.ts'
 import {generateBundle} from './generator.ts'
@@ -17,7 +18,7 @@ export function capturedNode(node:DesignNode):DesignNode {
 }
 function capturedSnapshot(snapshot:Snapshot):Snapshot{return {...snapshot,roots:snapshot.roots.map(capturedNode)}}
 
-function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number, codeFiles:CodeFile[] = [], canvasComponents = new Map<string,DesignNode>(), template:LayoutTemplate|null = null, resolveCapturedIcon?: (node:DesignNode)=>string|null, resolveCapturedColor?:ColorResolver) {
+function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number, codeFiles:CodeFile[] = [], canvasComponents = new Map<string,DesignNode>(), template:LayoutTemplate|null = null, resolveCapturedIcon?: (node:DesignNode)=>string|null, resolveCapturedColor?:ColorResolver, editorText?:ReturnType<typeof createEditorTextResolver>) {
   // Page-level snapshots contain every breakpoint canvas: never render these together.
   const bps = (page.breakpoints || []).filter(bp => bp.directory)
   const targets = bps.length ? [...bps].sort((a,b)=>Number(Boolean(b.primary))-Number(Boolean(a.primary)))
@@ -37,7 +38,8 @@ function pageVariantFiles(page:PageRecord, files:ArchiveFiles, pageIndex:number,
     let blocks:ReusableBlock[] = []
     if (typeof files[source + 'design.json'] === 'string') {
       const captured = capturedSnapshot(JSON.parse(textFile(files,source + 'design.json')) as Snapshot)
-      const original = template ? contentWithinLayout(captured) : captured
+      const withText=editorText?.resolve(captured,page.id??'')??captured
+      const original = template ? contentWithinLayout(withText) : withText
       const updated = generateBundle(original, { collectReusable:true, resolveCapturedIcon, resolveCapturedColor, resolveCanvasComponent: identifier => canvasComponents.get(String(identifier)) || null, resolveCodeComponent(identifier) {
         const match = findCodeComponent(identifier, codeFiles)
         return match ? { exportName: match.exportName, importPath: relativeModule(componentPath, 'preview/src/components/code/' + match.path) } : null
@@ -72,7 +74,7 @@ export function collectCanvasComponents(files:ArchiveFiles) {
   return map
 }
 
-export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null,resolveCapturedIcon}:PreviewOptions={}) {
+export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFiles, {title='Framer export', diagnostics=null, layoutSource=null,resolveCapturedIcon,editorText}:PreviewOptions={}) {
   const files:ArchiveFiles = {}
   const designTokens=createDesignTokens(sourceFiles)
   const layouts=layoutModules(layoutSource,pages,resolveCapturedIcon,designTokens.resolve)
@@ -84,7 +86,7 @@ export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFile
   const routeEntries:RouteEntry[] = []
   const reusable:ReusableVariant[] = []
   for (const [i,page] of pages.entries()) {
-    const variantsResult = pageVariantFiles(page, sourceFiles, i, codeFiles, canvasComponents, layouts.assignments.get(page.path) ?? null,resolveCapturedIcon,designTokens.resolve)
+    const variantsResult = pageVariantFiles(page, sourceFiles, i, codeFiles, canvasComponents, layouts.assignments.get(page.path) ?? null,resolveCapturedIcon,designTokens.resolve,editorText)
     Object.assign(files, variantsResult.copies)
     reusable.push(...variantsResult.reusable)
     if (!variantsResult.variants.length) continue
@@ -135,6 +137,7 @@ export function generatePreviewFiles(pages:PageRecord[], sourceFiles:ArchiveFile
   files['preview/src/tokens.css'] = designTokens.css
   files['preview/design-tokens.csv'] = designTokens.inventory
   files['preview/design-tokens.json'] = JSON.stringify(designTokens.report(),null,2)
+  if(editorText)files['preview/editor-source-report.json']=JSON.stringify(editorText.report(),null,2)
   files['preview/src/font-assets.css'] = sourceFiles['assets/fonts.css'] || ''
   for (const [path,content] of Object.entries(sourceFiles)) {
     if (path.startsWith('assets/') && !path.endsWith('/manifest.json')) files['preview/public/' + path] = content
