@@ -4,7 +4,8 @@
 // Usage: node schema/evidence-sidecar.ts <exportDir> <publishedBaseUrl> <outDir> [--routes /,/blog | all]
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { chromium } from '@playwright/test';
 
@@ -33,7 +34,7 @@ function readDesigns(exportDir: string): DesignFile[] {
 }
 
 // Runs in the page. Only visible RichTextContainers count, so SSR copies of other breakpoints are excluded.
-function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[] {
+export function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[] {
   const named = (el: Element | null): string[] => {
     const out: string[] = [];
     for (let e = el; e && e !== document.body; e = e.parentElement) {
@@ -53,15 +54,14 @@ function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[] {
   return [...document.querySelectorAll('[data-framer-component-type="RichTextContainer"]')]
     .filter((el) => el.checkVisibility())
     .map((el) => {
-      let block = el.querySelector('h1,h2,h3,h4,h5,h6,p,li') ?? el;
-      if(block===el){
-        // Framer can emit a RichTextContainer whose whole text lives in nested spans.
-        // Follow a single text-preserving inline chain rather than reading wrapper defaults.
-        while(block.children.length===1&&block.firstElementChild?.tagName==='SPAN'&&block.firstElementChild.textContent===block.textContent&&/^(inline|block|inline-block)$/.test(getComputedStyle(block.firstElementChild).display))block=block.firstElementChild;
-      }
+      // Preserve the semantic block for tag/break metadata, but measure the same
+      // text-bearing element as the candidate gate and rendered-surface audit.
+      const semanticBlock = el.matches('h1,h2,h3,h4,h5,h6,p,li') ? el : el.querySelector('h1,h2,h3,h4,h5,h6,p,li') ?? el;
+      let block = semanticBlock;
+      while(block.children.length===1&&block.firstElementChild?.tagName==='SPAN'&&block.firstElementChild.textContent===block.textContent&&/^(inline|block|inline-block)$/.test(getComputedStyle(block.firstElementChild).display))block=block.firstElementChild;
       const cs = getComputedStyle(block) as unknown as Record<string, string>;
       const r = el.getBoundingClientRect();
-      const style: Record<string, string> = { tag: block.tagName.toLowerCase(), blocks: String(el.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li').length) };
+      const style: Record<string, string> = { tag: semanticBlock.tagName.toLowerCase(), blocks: String(el.matches('h1,h2,h3,h4,h5,h6,p,li') ? 1 : el.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li').length) };
       for (const p of props) style[p] = cs[p];
       // Only explicit BRs within a single text block. Never infer a hard break from visual wrapping.
       const singleBlock = style.blocks === '1';
@@ -184,4 +184,4 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({completed:summary.length,expected:routes.length*WIDTHS.length,errors:summary.filter(s=>s.error).length}));
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

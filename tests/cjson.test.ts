@@ -60,3 +60,18 @@ test('compiler ignores stale verification overlays and node reference fields',()
  raw['design.json']=JSON.stringify(d);raw['reference/overlay.json']=JSON.stringify({nodes:{label:{textStyle:{fontSize:'99px'}}}})
  assert.deepEqual(compileReactArchive(raw),a)
 })
+
+test('stale legacy reference vector cannot suppress a captured icon identity',async()=>{
+ const raw=make(),d=JSON.parse(asText(raw['design.json']))
+ const icon={id:'arrow',kind:'IconNode',attributes:{icon:'arrow-right',set:'Lucide',width:'24px',height:'24px'}}
+ d.roots[0].children.push(icon)
+ raw['design.json']=JSON.stringify(d)
+ const expected=await compileCapturedArchive(raw)
+ const paths=Object.keys(expected.files).filter(k=>k.startsWith('preview/public/assets/vectors/')&&k.endsWith('.svg'))
+ assert.ok(paths.length>0,'captured identity resolves a real SVG')
+ const reference={vector:{viewBox:'0 0 24 24',shapes:[{tag:'path',attrs:{d:'M0 0L10 10',stroke:'#fff'}}]}}
+ d.roots[0].children.at(-1).reference=reference
+ const stale={...raw,'design.json':JSON.stringify(d)}
+ assert.deepEqual(await compileCapturedArchive(stale),expected)
+ assert.deepEqual(await compileCapturedArchive(await packCaptureDocuments(stale)),expected)
+})

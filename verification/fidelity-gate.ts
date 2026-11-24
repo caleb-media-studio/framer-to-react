@@ -2,7 +2,8 @@
 // screenshot, using the fixed tolerances in schema/FIDELITY_GATE.md. Anything not verified is reported as unverified.
 // Usage: node schema/fidelity-gate.ts <evidenceDir> <liveBaseUrl> <previewBaseUrl> <outDir> [--routes /,/blog|all] [--workers 3]
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {createHash} from 'node:crypto';
 
 import { chromium, type Browser } from '@playwright/test';
@@ -22,7 +23,7 @@ interface EvidenceDoc { provenance?: {url?:string;responseSha256?:string;viewpor
 const fileStem = (route: string): string => (route === '/' ? '_index' : route.replace(/^\//, '').replace(/\//g, '_'));
 
 // Runs in the preview page.
-function collectPreview(args: { ids: string[]; props: string[] }): Record<string, { style: Record<string, string>; bbox: Box; visible: boolean } | null> {
+export function collectPreview(args: { ids: string[]; props: string[] }): Record<string, { style: Record<string, string>; bbox: Box; visible: boolean } | null> {
   const out: Record<string, { style: Record<string, string>; bbox: Box; visible: boolean } | null> = {};
   for (const id of args.ids) {
     const el = [...document.querySelectorAll(`[data-f2a-node="${CSS.escape(id)}"]`)].find((e) => e.checkVisibility()) ?? document.querySelector(`[data-f2a-node="${CSS.escape(id)}"]`);
@@ -177,4 +178,4 @@ async function main(): Promise<void> {
   if (!passed) process.exitCode = 1;
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

@@ -109,7 +109,8 @@ export async function compileCapturedArchive(files:Readonly<ArchiveFiles>){
  const decoded=await unpackCaptureDocuments(files)
  const wanted=new Map<string,DesignNode>()
  const visit=(n:DesignNode):void=>{
-  if(!svgMarkup(n)&&typeof n.attributes?.icon==='string'&&(n.attributes.set||n.attributes.iconSetId||n.attributes.iconSet))wanted.set(iconIdentity(n),n)
+  // Legacy verification is never source artwork, even during icon discovery.
+  if(!svgMarkup({...n,reference:undefined})&&typeof n.attributes?.icon==='string'&&(n.attributes.set||n.attributes.iconSetId||n.attributes.iconSet))wanted.set(iconIdentity(n),n)
   for(const c of n.children||[])visit(c)
  }
  for(const [name,value] of Object.entries(decoded)){
