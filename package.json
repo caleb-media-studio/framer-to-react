@@ -23,8 +23,12 @@
     "@iconify-json/meteor-icons": "^1.2.10",
     "@iconify-json/nonicons": "^1.2.2",
     "@iconify-json/ph": "^1.2.2",
+    "@playwright/test": "1.65.1",
     "@sargamicons/static": "^1.6.7",
+    "@types/node": "24.19.2",
+    "bun": "1.4.5",
     "lucide-static": "^1.75.0",
+    "typescript": "5.9.3",
     "vite": "^6.3.0",
     "vite-plugin-framer": "^1.1.1"
   }
