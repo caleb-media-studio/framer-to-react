@@ -1,0 +1,171 @@
+// Fidelity gate: compares the generated preview against the published Framer site, per text layer and per full-page
+// screenshot, using the fixed tolerances in schema/FIDELITY_GATE.md. Anything not verified is reported as unverified.
+// Usage: node schema/fidelity-gate.ts <evidenceDir> <liveBaseUrl> <previewBaseUrl> <outDir> [--routes /,/blog|all] [--workers 3]
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {createHash} from 'node:crypto';
+
+import { chromium, type Browser } from '@playwright/test';
+
+import { compareBox, compareStyle, pixelVerdict, gatePassed, TOL, type Box, type FieldMismatch, type Style } from './fidelity-compare.ts';
+
+const WIDTHS = [390, 810, 1200, 1920] as const;
+const VIEWPORT_HEIGHT = 900;
+const NAV_TIMEOUT_MS = 60_000;
+const SETTLE_MS = 800;
+const STYLE_PROPS = ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'textTransform', 'color'];
+
+interface Evidence { nodeId: string; confidence: string; framerName: string; style: Style; bbox: Box }
+interface EvidenceDoc { provenance?: {url?:string;responseSha256?:string;viewport?:{width:number;height:number}}; breakpointId: string | null; evidence: Evidence[]; unmatchedArchive: unknown[]; unmatchedLive: { name: string; text: string }[] }
+
+const fileStem = (route: string): string => (route === '/' ? '_index' : route.replace(/^\//, '').replace(/\//g, '_'));
+
+// Runs in the preview page.
+function collectPreview(args: { ids: string[]; props: string[] }): Record<string, { style: Record<string, string>; bbox: Box; visible: boolean } | null> {
+  const out: Record<string, { style: Record<string, string>; bbox: Box; visible: boolean } | null> = {};
+  for (const id of args.ids) {
+    const el = [...document.querySelectorAll(`[data-f2a-node="${CSS.escape(id)}"]`)].find((e) => e.checkVisibility()) ?? document.querySelector(`[data-f2a-node="${CSS.escape(id)}"]`);
+    if (!el) { out[id] = null; continue; }
+    const block = el.matches('h1,h2,h3,h4,h5,h6,p,li') ? el : el.querySelector('h1,h2,h3,h4,h5,h6,p,li') ?? el;
+    const cs = getComputedStyle(block) as unknown as Record<string, string>;
+    const r = el.getBoundingClientRect();
+    const style: Record<string, string> = {};
+    for (const p of args.props) style[p] = cs[p];
+    out[id] = { style, bbox: { x: r.x + scrollX, y: r.y + scrollY, width: r.width, height: r.height }, visible: el.checkVisibility() };
+  }
+  return out;
+}
+
+// Runs in a blank page: decodes both PNGs and counts pixels whose max channel delta exceeds the threshold.
+async function diffPngs(args: { a: string; b: string; channel: number }): Promise<{ differing: number; total: number; heights: [number, number] }> {
+  const load = async (b64: string): Promise<ImageBitmap> => createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+  const [ia, ib] = await Promise.all([load(args.a), load(args.b)]);
+  const w = Math.max(ia.width, ib.width), h = Math.max(ia.height, ib.height);
+  const pixels = (img: ImageBitmap): Uint8ClampedArray => {
+    const c = new OffscreenCanvas(w, h); const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#ff00ff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, w, h).data;
+  };
+  const pa = pixels(ia), pb = pixels(ib);
+  let differing = 0;
+  for (let i = 0; i < pa.length; i += 4) {
+    if (Math.abs(pa[i] - pb[i]) > args.channel || Math.abs(pa[i + 1] - pb[i + 1]) > args.channel || Math.abs(pa[i + 2] - pb[i + 2]) > args.channel) differing++;
+  }
+  return { differing, total: w * h, heights: [ia.height, ib.height] };
+}
+
+async function shoot(browser: Browser, url: string, width: number, file: string): Promise<{ buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; error?: string }> {
+  const page = await browser.newPage({ viewport: { width, height: VIEWPORT_HEIGHT }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
+  try {
+    const res = await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
+    await page.evaluate(()=>document.fonts.ready);
+    await page.waitForTimeout(SETTLE_MS);
+    const responseSha256=res?.ok()?createHash('sha256').update(await res.body()).digest('hex'):undefined;
+    const docH = await page.evaluate(() => document.documentElement.scrollHeight);
+    const buf = await page.screenshot({ path: file, fullPage: true });
+    return { buf, docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
+  } finally { await page.close(); }
+}
+
+async function runCase(browser: Browser, route: string, width: number, evidenceDir: string, live: string, prev: string, outDir: string): Promise<Record<string, unknown>> {
+  const stem = `${fileStem(route)}.${width}`;
+  const evFile = join(evidenceDir, `${stem}.json`);
+  const result: Record<string, unknown> = { route, width };
+  const unverified: string[] = [];
+  const mismatches: { nodeId: string; name: string; fields: FieldMismatch[] }[] = [];
+  const doc: EvidenceDoc | null = existsSync(evFile) ? JSON.parse(readFileSync(evFile, 'utf8')) : null;
+  if (!doc) unverified.push('no evidence file');
+  else if (!doc.breakpointId) unverified.push('evidence breakpointId null');
+
+  mkdirSync(join(outDir, 'shots'), { recursive: true });
+  const liveShotFile = join(outDir, 'shots', `${stem}.live.png`);
+  const previewUrl = new URL(route, prev);
+  previewUrl.searchParams.set('fidelity', '1');
+  const [l, p] = await Promise.all([shoot(browser, new URL(route, live).href, width, liveShotFile), shoot(browser, previewUrl.href, width, join(outDir, 'shots', `${stem}.prev.png`))]);
+  if (l.error) unverified.push(`live ${l.error}`);
+  if (p.error) mismatches.push({ nodeId: '(page)', name: 'preview load', fields: [{ field: 'http', expected: 200, actual: p.error }] });
+
+  const fresh = Boolean(doc?.breakpointId && !l.error && doc.provenance?.url===new URL(route,live).href &&
+    doc.provenance?.viewport?.width===width && doc.provenance?.viewport?.height===VIEWPORT_HEIGHT &&
+    doc.provenance?.responseSha256 && doc.provenance.responseSha256===l.responseSha256 &&
+    new URL(l.finalUrl).pathname===new URL(route,live).pathname);
+  if(doc&&!fresh)unverified.push('source evidence revision, route or viewport not verified');
+  if (doc && fresh && !p.error) {
+    const high = doc.evidence.filter((e) => e.confidence === 'high');
+    for (const e of doc.evidence.filter((e) => e.confidence !== 'high')) unverified.push(`${e.confidence} match ${e.nodeId} "${e.framerName}"`);
+    for (const u of doc.unmatchedLive) unverified.push(`live text without archive match "${u.name}" "${u.text}"`);
+    if (doc.unmatchedArchive.length) unverified.push(`${doc.unmatchedArchive.length} archive text layers not visible/matched live`);
+    const page = await browser.newPage({ viewport: { width, height: VIEWPORT_HEIGHT }, reducedMotion: 'reduce' });
+    await page.goto(previewUrl.href, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
+    await page.waitForTimeout(SETTLE_MS);
+    const got = await page.evaluate(collectPreview, { ids: high.map((e) => e.nodeId), props: STYLE_PROPS });
+    await page.close();
+    for (const e of high) {
+      const a = got[e.nodeId];
+      const fields = !a ? [{ field: 'layer', expected: 'present', actual: 'missing' }] : !a.visible ? [{ field: 'layer', expected: 'visible', actual: 'hidden' }] : [...compareStyle(e.style, a.style), ...compareBox(e.bbox, a.bbox)];
+      if (fields.length) mismatches.push({ nodeId: e.nodeId, name: e.framerName, fields });
+    }
+    result.layersChecked = high.length;
+  }
+
+  if(l.error||p.error||new URL(l.finalUrl).pathname!==new URL(route,live).pathname){
+    unverified.push('screenshot comparison unavailable: source or preview load/route failure');
+    return {...result,docH:[l.docH,p.docH],mismatchLayers:mismatches.length,unverifiedCount:unverified.length,mismatches,unverified};
+  }
+  const blank = await browser.newPage();
+  const d = await blank.evaluate(diffPngs, { a: l.buf.toString('base64'), b: p.buf.toString('base64'), channel: TOL.pixelChannel });
+  await blank.close();
+  const v = pixelVerdict(d.differing, d.total, [l.docH, p.docH]);
+  result.docH = [l.docH, p.docH];
+  result.pixelRatio = Math.round(v.ratio * 1e5) / 1e5;
+  if (!v.pass) mismatches.push({ nodeId: '(page)', name: 'full-page screenshot', fields: [{ field: 'pixels', expected: `≤${TOL.pixelRatio}`, actual: result.pixelRatio as number }, { field: 'docH', expected: l.docH, actual: p.docH }] });
+  return { ...result, mismatchLayers: mismatches.length, unverifiedCount: unverified.length, mismatches, unverified };
+}
+
+async function main(): Promise<void> {
+  const flag = (n: string): string | undefined => (process.argv.includes(n) ? process.argv[process.argv.indexOf(n) + 1] : undefined);
+  const [evidenceDir, live, prev, outDir] = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && !all[i - 1]?.startsWith('--'));
+  if (!evidenceDir || !live || !prev || !outDir) {
+    console.error('Usage: node schema/fidelity-gate.ts <evidenceDir> <liveBaseUrl> <previewBaseUrl> <outDir> [--routes /,/blog] [--workers 3]');
+    process.exit(2);
+  }
+  const summaryFile = join(evidenceDir, 'summary.json');
+  const manifestPath=flag('--manifest');
+  const manifest=manifestPath ? JSON.parse(readFileSync(manifestPath,'utf8')) as {pages:{path:string;breakpoints?:{width:string}[]}[];requestedPages?:number;failures?:unknown[]} : null;
+  const allRoutes = manifest ? manifest.pages.map(p=>p.path) : [...new Set((JSON.parse(readFileSync(summaryFile, 'utf8')) as { route: string }[]).map((s) => s.route))];
+  if(new Set(allRoutes).size!==allRoutes.length || new Set(allRoutes.map(fileStem)).size!==allRoutes.length)throw Error('Duplicate or ambiguous route evidence filenames');
+
+  const routeFlag = flag('--routes');
+  const routes = !routeFlag || routeFlag === 'all' ? allRoutes : routeFlag.split(',');
+  mkdirSync(outDir, { recursive: true });
+  const fullScope=!routeFlag||routeFlag==='all';
+  if(fullScope&&!manifest)throw Error('Full-project gate requires --manifest <original export manifest.json>; evidence summary cannot define expected coverage');
+  if(manifest&&routes.some(r=>!allRoutes.includes(r)))throw Error('Requested route missing from original manifest');
+  const cases=routes.flatMap(r=>{
+    const page=manifest?.pages.find(p=>p.path===r);
+    const widths=page?.breakpoints?.map(b=>parseFloat(b.width)).filter(w=>Number.isFinite(w)&&w>0)||[];
+    return [...new Set([...WIDTHS,...widths])].map(w=>[r,w] as const);
+  });
+  const browser = await chromium.launch();
+  const results: Record<string, unknown>[] = [];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < cases.length) {
+      const [route, width] = cases[next++];
+      try { results.push(await runCase(browser, route, width, evidenceDir, live, prev, outDir)); }
+      catch (err) { results.push({ route, width, error: `gate crashed: ${(err as Error).message}`, mismatchLayers: 1, unverifiedCount: 1, mismatches: [], unverified: ['gate error'] }); }
+      const r = results[results.length - 1];
+      console.log(JSON.stringify({ route: r.route, width: r.width, layers: r.layersChecked, mismatch: r.mismatchLayers, unverified: r.unverifiedCount, pixelRatio: r.pixelRatio, docH: r.docH, error: r.error }));
+    }
+  };
+  try { await Promise.all(Array.from({ length: Number(flag('--workers') ?? 3) }, worker)); } finally { await browser.close(); }
+  results.sort((a, b) => String(a.route).localeCompare(String(b.route)) || Number(a.width) - Number(b.width));
+  const totals = { cases: results.length, passing: results.filter((r) => r.mismatchLayers === 0 && r.unverifiedCount === 0).length, mismatchLayers: results.reduce((s, r) => s + Number(r.mismatchLayers), 0), unverified: results.reduce((s, r) => s + Number(r.unverifiedCount), 0) };
+  const captureComplete=!!manifest && !manifest.failures?.length && (manifest.requestedPages??manifest.pages.length)===manifest.pages.length;
+  const passed = gatePassed(totals, cases.length) && (!fullScope||captureComplete);
+  writeFileSync(join(outDir, 'gate.json'), JSON.stringify({ passed, scope:fullScope?'full-project':'selected-routes', captureComplete, expectedCases: cases.length, tolerances: TOL, totals, results }, null, 2));
+  console.log(JSON.stringify({ passed, totals }));
+  if (!passed) process.exitCode = 1;
+}
+
+await main();

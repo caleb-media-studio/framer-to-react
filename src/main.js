@@ -302,10 +302,10 @@ async function exportFolder(path, explicitPages = null) {
       relinkDownloadedAssets(files, assets.manifest)
     }
     files['AGENT.md'] = projectHandoff(manifest) + '\nRead diagnostics.md for actual failures and grouped review notes. Full per-layer data is in diagnostics.json.\n' + appendLibraryInstructions(library, assets)
-    files['README.md'] = `# Framer to Agent folder export\n\nFolder: ${path}\nExported pages: ${manifest.pages.length} of ${list.length}\n\n**Run immediately:** cd preview && npm install && npm run dev and open Vite's localhost URL.\n\nRead AGENT.md and manifest.json. Each route is under pages/ with TSX, CSS, design.json, and breakpoint variants. Shared components, code files, styles and CMS schema are under library/. Referenced images and SVGs are under assets/ where Framer allows local download.\nThis is Framer Plugin API data, not its private source format.\n`
+    files['README.md'] = `# Framer to React folder export\n\nFolder: ${path}\nExported pages: ${manifest.pages.length} of ${list.length}\n\n**Run immediately:** cd preview && npm install && npm run dev and open Vite's localhost URL.\n\nRead AGENT.md and manifest.json. Each route is under pages/ with TSX, CSS, design.json, and breakpoint variants. Shared components, code files, styles and CMS schema are under library/. Referenced images and SVGs are under assets/ where Framer allows local download.\nThis is Framer Plugin API data, not its private source format.\n`
     if (rawOnly) {
       files['AGENT.md'] = '# Raw Framer design archive\n\nCompile this immutable archive with the standalone React compiler. Read manifest.json and diagnostics.json for capture coverage and API limitations.\n'
-      files['README.md'] = '# Framer design archive\n\nContains raw design.json trees, component definitions, original code files, styles, assets and capture diagnostics. No generated React or preview. Compile using scripts/compile-react.mjs in Framer to Agent.\n'
+      files['README.md'] = '# Framer design archive\n\nContains raw design.json trees, component definitions, original code files, styles, assets and capture diagnostics. No generated React or preview. Compile using scripts/compile-react.mjs in Framer to React.\n'
     }
     const saved = await writeZip(files, `framer-${slug(path === '/' ? 'entire-project' : path)}-${rawOnly?'design':'react'}.zip`)
     lastHandoff = files['AGENT.md']

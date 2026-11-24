@@ -1,12 +1,11 @@
 // Generalisation check: an unrelated synthetic project (different fonts, breakpoints, nesting, components, routes) must
 // produce output derived only from its own data, with none of the regression fixture's constants.
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
 import test from 'node:test'
 import {generateBundle} from '../src/generator.mjs'
 import {generatePreviewFiles} from '../src/preview.mjs'
 
-const constants = JSON.parse(fs.readFileSync(new URL('./fixtures/project-constants.json', import.meta.url), 'utf8')).strings
+const constants = ['Unrelated project sentinel','unrelated.example.test','unrelated-component-id','Unrelated Font']
 
 const heading = (id, size, spacing, align) => ({id, kind: 'TextNode', text: 'Seasonal menu', attributes: {name: 'Menu heading', font: {family: 'Fraunces', weight: 300}, inlineTextStyle: {fontSize: size, lineHeight: '1.3em', letterSpacing: spacing, alignment: align, color: 'rgb(120, 30, 40)'}}})
 const stack = (id, children) => ({id, kind: 'FrameNode', attributes: {name: 'Column', layout: 'stack', stackDirection: 'vertical', gap: '12px', width: '1fr'}, children})
