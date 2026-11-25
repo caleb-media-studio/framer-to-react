@@ -62,3 +62,10 @@ test('intrinsic fit text does not clamp to a narrow parent; explicit constraints
  assert.match(b.css,/max-width: 100px;/)
  assert.match(b.css,/width: 100%;/)
 })
+
+test('original OpenType feature selections are preserved and unsafe feature names are rejected',()=>{
+ const b=generateBundle({roots:[{id:'a',kind:'TextNode',text:'Example',attributes:{openTypeFontFeatures:{cv03:'on',liga:'off',ss01:2}}},{id:'b',kind:'TextNode',text:'Invalid',attributes:{openTypeFontFeatures:{'x; color:red':'on'}}}]})
+ assert.match(b.css,/font-feature-settings: "cv03" 1, "liga" 0, "ss01" 2;/)
+ assert.equal((b.css.match(/font-feature-settings:/g)||[]).length,1)
+ assert.doesNotMatch(b.css,/color:red/)
+})

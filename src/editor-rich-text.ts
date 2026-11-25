@@ -2,7 +2,7 @@ import type {OfficialNode} from './official-layouts.ts'
 export interface EditorTextRun {text?:string;lineBreak?:true;style?:Record<string,unknown>}
 export interface EditorTextBlock {tag:string;style:Record<string,unknown>;runs:EditorTextRun[]}
 export interface EditorRichText {blocks:EditorTextBlock[];base:Record<string,unknown>}
-const fields=['fontName','fontSize','fontWeight','fontStyle','textColor','lineHeight','letterSpacing','textAlignment','textAlign','textDecoration','textTransform','textWrap'] as const
+const fields=['fontName','fontSize','fontWeight','fontStyle','textColor','lineHeight','letterSpacing','textAlignment','textAlign','textDecoration','textTransform','textWrap','openTypeFontFeatures'] as const
 const pick=(n:OfficialNode)=>Object.fromEntries(fields.filter(k=>n[k]!==undefined&&n[k]!==null).map(k=>[k,n[k]]))
 /** Resolve original RichTextNode → TextBlock → TextRun data without flattening
  * mixed formatting. Uniform source values may be inherited; differing values

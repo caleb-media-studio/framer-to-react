@@ -104,6 +104,11 @@ export async function createEditorNodeResolver(d:EditorNodes,controls:IconContro
    for(const [key,value] of Object.entries(n))if(key.startsWith('$control__'))a.controls[key.slice(10)]=value
   }
   if(n.type==='FrameNode'){
+   // The plugin's percentage sizes may be rounded; use the exact original editor value.
+   for(const field of ['width','height','minWidth','maxWidth','minHeight','maxHeight'] as const)
+    if(typeof n[field]==='string')a[field]=n[field]==='auto'?'fit-content':n[field]
+   for(const field of ['htmlTag','ariaLabel','ariaHidden','cursor','pointerEvents','hoverEffect'] as const)
+    if(n[field]!=null)a[field]=n[field]
    // Prefer explicit source edge strokes; don't paint an all-sides border on a single divider.
    if(typeof n.borderStyle==='string'&&typeof n.borderColor==='string'&&['Top','Right','Bottom','Left'].some(side=>typeof n['border'+side]==='string')){
     delete a.border

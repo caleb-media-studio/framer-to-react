@@ -45,6 +45,14 @@ try{
  assert.equal(await vector.locator('path').evaluate(el=>getComputedStyle(el).stroke),'rgb(18, 52, 86)')
  assert.equal(await vector.locator('path').evaluate(el=>getComputedStyle(el).strokeWidth),'1.5px')
  assert.equal(await vector.evaluate(el=>getComputedStyle(el).maskImage),'none')
+ const hover=page.locator('nav[data-f2a-node="page-0-1200-hover"]')
+ assert.equal(await hover.getAttribute('aria-label'),'Hover test')
+ assert.equal(await hover.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(17, 17, 17)')
+ await hover.hover()
+ await page.waitForFunction(()=>{const el=document.querySelector('nav[data-f2a-node="page-0-1200-hover"]');return el&&getComputedStyle(el).backgroundColor==='rgb(255, 255, 255)'&&getComputedStyle(el).opacity==='0.8'})
+ await page.mouse.move(0,0)
+ await page.waitForFunction(()=>{const el=document.querySelector('nav[data-f2a-node="page-0-1200-hover"]');return el&&getComputedStyle(el).backgroundColor==='rgb(17, 17, 17)'})
+
 
 
  const input=page.locator('.exported-page input[type=email]')

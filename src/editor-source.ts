@@ -36,7 +36,7 @@ export function parseEditorSource(value:unknown,manifest:Manifest):EditorSource{
  }
  return d
 }
-const styleFields=['fontSize','fontWeight','fontStyle','fontName','lineHeight','letterSpacing','textColor','textAlign','textAlignment','textTransform','textDecoration','tag'] as const
+const styleFields=['fontSize','fontWeight','fontStyle','fontName','lineHeight','letterSpacing','textColor','textAlign','textAlignment','textTransform','textDecoration','openTypeFontFeatures','tag'] as const
 export function createEditorTextResolver(d:EditorSource,nodeResolver?:import('./editor-nodes.ts').EditorNodeResolver){
  const nodes=new Map(d.text.map(t=>[JSON.stringify([t.$scopeId,t.$groundNodeId,t.id]),t]))
  const applied=new Set<string>(),conflicts=new Set<string>(),complex=new Set<string>()

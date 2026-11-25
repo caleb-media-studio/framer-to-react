@@ -21,6 +21,12 @@ function cssLen(v: any):string|null {
   }
   return null
 }
+function fontFeatures(value:unknown):string|null{
+  if(!value||typeof value!=='object'||Array.isArray(value))return null
+  const pairs=Object.entries(value)
+  if(!pairs.length||pairs.some(([tag,v])=>!/^[A-Za-z0-9]{4}$/.test(tag)||!(v==='on'||v==='off'||typeof v==='number'&&Number.isInteger(v)&&v>=0)))return null
+  return pairs.map(([tag,v])=>JSON.stringify(tag)+' '+(v==='on'?1:v==='off'?0:v)).join(', ')
+}
 function cssColor(value: any):string|null {
   const v = typeof value === 'string' ? value : value?.light ?? value?.color ?? value?.value ?? value?.dark
   if (typeof v !== 'string') return null
@@ -96,6 +102,8 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, reso
   const tw:string[] = []
   const put = (k:string,v:string|null|undefined) => { if (v != null && v !== '') s[k] = v }
   if (a.visible === false) tw.push('hidden')
+  if (/^(auto|default|pointer|text|move|grab|grabbing|not-allowed|crosshair|help|wait|progress|none)$/.test(a.cursor)) put('cursor', a.cursor)
+  if (a.pointerEvents==='none'||a.pointerEvents==='auto') put('pointer-events',a.pointerEvents)
   if (a.position && ['relative','absolute','fixed','sticky'].includes(a.position)) tw.push(unplacedAbsolute(a, unhydrated) ? 'relative' : a.position)
   if (a.layout === 'stack') {
     tw.push('flex')
@@ -199,6 +207,7 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, reso
     const family = font.family || ts.font?.family || a.fontName || a.fontFamily
     put('font-family', typeof family === 'string' ? JSON.stringify(family) : null)
     put('font-weight', cssVal(font.weight ?? ts.font?.weight ?? ts.fontWeight ?? a.fontWeight))
+    put('font-feature-settings',fontFeatures(a.openTypeFontFeatures))
     const fontStyle=font.style??ts.font?.style??ts.fontStyle??a.fontStyle
     if(/^(normal|italic|oblique)$/.test(fontStyle))put('font-style',fontStyle)
     const decoration=ts.decoration??ts.textDecoration??a.textDecoration
@@ -364,6 +373,31 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
       if (!tw.some(v => ['relative','absolute','fixed','sticky'].includes(v))) tw.push('relative')
       css[`.${cls}::after`] = {content:'""',position:'absolute',inset:'0',...overlayBorder,...edgeBorders,'border-radius':'inherit','box-sizing':'border-box','pointer-events':'none'}
     }
+    const hover=attrs.hoverEffect
+    if(hover&&typeof hover==='object'&&hover.transition?.type==='tween'){
+      const state:CSSProperties={}
+      const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)
+      const distance=(v:unknown)=>finite(v)?v+'px':typeof v==='string'&&/^-?\d+(?:\.\d+)?px$/.test(v)?v:null
+      const angle=(v:unknown)=>finite(v)?v+'deg':typeof v==='string'&&/^-?\d+(?:\.\d+)?deg$/.test(v)?v:null
+      const duration=(v:unknown)=>typeof v==='string'&&/^\d+(?:\.\d+)?(?:ms|s)$/.test(v)?v:null
+      const x=distance(hover.x),y=distance(hover.y),rotate=angle(hover.rotate),sx=angle(hover.skewX),sy=angle(hover.skewY)
+      const transforms:string[]=[]
+      if(x&&y&&(parseFloat(x)!==0||parseFloat(y)!==0))transforms.push('translate('+x+', '+y+')')
+      if(rotate&&parseFloat(rotate)!==0)transforms.push('rotate('+rotate+')')
+      if(finite(hover.scale)&&hover.scale!==1&&hover.scale>=0)transforms.push('scale('+hover.scale+')')
+      if(sx&&parseFloat(sx)!==0)transforms.push('skewX('+sx+')')
+      if(sy&&parseFloat(sy)!==0)transforms.push('skewY('+sy+')')
+      if(transforms.length)state.transform=[localCss.transform,...transforms].filter(Boolean).join(' ')
+      if(finite(hover.opacity)&&hover.opacity>=0&&hover.opacity<=1)state.opacity=String(hover.opacity)
+      const background=options.resolveCapturedColor?.(hover.backgroundColor,node,'hoverEffect.backgroundColor')??cssColor(hover.backgroundColor)
+      if(background)state['background-color']=background
+      const time=duration(hover.transition.duration),delay=duration(hover.transition.delay)
+      const ease=hover.transition.ease
+      if(time&&delay&&Array.isArray(ease)&&ease.length===4&&ease.every(finite)&&ease[0]>=0&&ease[0]<=1&&ease[2]>=0&&ease[2]<=1&&Object.keys(state).length){
+        localCss.transition=Object.keys(state).map(k=>k+' '+time+' cubic-bezier('+ease.join(', ')+') '+delay).join(', ')
+        css['.'+cls+':hover']=state
+      }
+    }
     if (Object.keys(localCss).length) css[`.${cls}`] = localCss
     const className = [...tw, cls].join(' ')
     // Layer id on the DOM lets preview fidelity checks compare each rendered box with its captured rect.
@@ -396,7 +430,7 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
       const result:Record<string,string>={}
       const put=(k:string,x:string|null|undefined)=>{if(x!=null)result[k]=x}
       if(typeof v.fontName==='string')put('fontFamily',v.fontName)
-      put('fontSize',cssLen(v.fontSize));put('fontWeight',cssVal(v.fontWeight))
+      put('fontSize',cssLen(v.fontSize));put('fontWeight',cssVal(v.fontWeight));put('fontFeatureSettings',fontFeatures(v.openTypeFontFeatures))
       if(typeof v.fontStyle==='string'&&/^(normal|italic|oblique)$/.test(v.fontStyle))put('fontStyle',v.fontStyle)
       put('letterSpacing',cssLen(v.letterSpacing))
       put('lineHeight',cssLen(v.lineHeight))
@@ -436,12 +470,14 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
       return `${indent}<img ${classAttr} src=${JSON.stringify(imageUrl)} alt=${JSON.stringify(String(attrs.altText || attrs.alt || attrs.name || ''))} />`
     }
     let tag = typeof node.text === 'string' ? 'p' : 'div'
+    if(typeof node.text!=='string'&&/^(main|nav|header|footer|aside|article|section|div)$/.test(attrs.htmlTag))tag=attrs.htmlTag
     if (/Heading|Title|H1/i.test(attrs.name || '') && typeof node.text === 'string') tag = 'h2'
     if (typeof node.text === 'string' && /^(h[1-6]|p)$/.test(attrs.tag || node.reference?.tag || '')) tag = attrs.tag || node.reference!.tag!
     const link = safeLink(attrs.link)
     if (link) tag = 'a'
     const props = [`${classAttr}`]
     if(typeof attrs.ariaLabel==='string')props.push('aria-label='+JSON.stringify(attrs.ariaLabel))
+    if(typeof attrs.ariaHidden==='boolean')props.push('aria-hidden={'+attrs.ariaHidden+'}')
     if (link) {
       props.push(`href=${JSON.stringify(link)}`)
       if (attrs.linkOpenInNewTab) props.push('target="_blank"', 'rel="noopener noreferrer"')
