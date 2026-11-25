@@ -255,6 +255,8 @@ export function expandCanvasInstance(instance:DesignNode, component:DesignNode|n
   if(!variant){if(component?.attributes?.editorComponentId)throw Error('Unresolved captured component variant '+String(selected));return null}
   if(ia.editorComponentId&&component?.attributes?.editorComponentId&&ia.editorComponentId!==component.attributes.editorComponentId)throw Error('Captured component instance identity mismatch')
   const attributes:Attributes = {...variant.attributes}
+  // Preserve the authoritative variant wrapper name independently of the instance name.
+  if(component?.attributes?.editorComponentId&&typeof variant.attributes?.name==='string'&&variant.attributes.name)attributes.editorVariantName=variant.attributes.name
   for (const key of OFFSET_KEYS) delete attributes[key]
   for (const key of ['name','position','width','height','visible','opacity','rotation',...OFFSET_KEYS]) if (ia[key] !== undefined) attributes[key] = ia[key]
   // Definition IDs repeat for every instance. Use stable occurrence IDs so evidence

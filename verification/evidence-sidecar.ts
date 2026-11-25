@@ -56,8 +56,22 @@ export function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[]
     }
     return parts.join('>');
   };
-  return [...document.querySelectorAll('[data-framer-component-type="RichTextContainer"]')]
-    .filter((el) => el.checkVisibility())
+  const selector='[data-framer-component-type="RichTextContainer"]';
+  const normalize=(s:string)=>s.normalize('NFC').replace(/\s+/g,' ').trim();
+  const visible=[...document.querySelectorAll(selector)].filter(el=>el.checkVisibility());
+  const visibleSet=new Set(visible);
+  const contextMemo=new WeakMap<Element,string[]>();
+  const contents=(parent:Element)=>{
+    if(contextMemo.has(parent))return contextMemo.get(parent)!;
+    const entries:string[]=[];
+    for(const el of parent.querySelectorAll(selector)){
+      if(!visibleSet.has(el)||!el.textContent?.trim())continue;
+      entries.push(JSON.stringify([el.getAttribute('data-framer-name')??'',normalize(el.textContent)]));
+      if(entries.length>64)break;
+    }
+    contextMemo.set(parent,entries);return entries;
+  };
+  return visible
     .map((el) => {
       // Preserve the semantic block for tag/break metadata, but measure the same
       // text-bearing element as the candidate gate and rendered-surface audit.
@@ -101,7 +115,17 @@ export function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[]
         })() : undefined;
       const siblingText = [...(el.parentElement?.children ?? [])].filter(s=>s!==el && s.getAttribute('data-framer-component-type')==='RichTextContainer' && s.checkVisibility() && s.textContent?.trim())
         .map(s=>JSON.stringify([s.getAttribute('data-framer-name')??'',(s.textContent??'').normalize('NFC').replace(/\s+/g,' ').trim()]));
+      const own=JSON.stringify([el.getAttribute('data-framer-name')??'',normalize(el.textContent??'')]);
+      const ancestorContexts:string[]=[];
+      let namedParents=0;
+      for(let parent=el.parentElement;parent&&parent!==document.body&&namedParents<3;parent=parent.parentElement){
+        const name=parent.getAttribute('data-framer-name');if(!name)continue;
+        namedParents++;
+        const entries=contents(parent);
+        if(entries.length>=2&&entries.length<=64&&entries.some(x=>x!==own))ancestorContexts.push(JSON.stringify([name,[...entries].sort()]));
+      }
       return {
+        ...(ancestorContexts.length?{ancestorContexts}:{}),
         ...(siblingText.length ? {siblingText} : {}),
         name: el.getAttribute('data-framer-name') ?? '',
         text: (el.textContent ?? '').normalize('NFC').replace(/\s+/g, ' ').trim(),
