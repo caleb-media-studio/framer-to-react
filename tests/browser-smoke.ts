@@ -1,5 +1,5 @@
 import {collectLive} from '../verification/evidence-sidecar.ts'
-import {collectPreview,diffPngs} from '../verification/fidelity-gate.ts'
+import {collectPreview,diffPngs,excludePlatformBadge} from '../verification/fidelity-gate.ts'
 import {compareStyle} from '../verification/fidelity-compare.ts'
 import {collectRenderAudit,compareRenderAudit} from '../verification/render-audit.ts'
 import assert from 'node:assert/strict'
@@ -126,6 +126,20 @@ try{
  const full=await auditPage.evaluate(diffPngs,{a:image.a,b:image.changed,channel:32})
  assert.equal(full.exactDiffering,5)
  assert.equal(full.outsideBadgeDiffering,5)
+ await auditPage.setContent('<style>body{margin:0;background:black}#__framer-badge-container{position:fixed;pointer-events:none;bottom:10px;right:10px}.__framer-badge{display:block;width:80px;height:30px;background:white}.__framer-badge>div{width:100%;height:100%;box-shadow:0 4px 8px 0 #fff}</style><a id="author" href="https://framer.com/">Author link</a><div id="__framer-badge-container"><a class="__framer-badge" data-nosnippet="true" href="https://framer.com/"><div></div></a></div>')
+ const originalBadge=await auditPage.screenshot({fullPage:true})
+ const platform=await auditPage.evaluate(excludePlatformBadge)
+ assert.equal(platform.removed,1)
+ assert.equal(platform.unsupportedPaint,false)
+ assert.ok(platform.paintBounds.some(b=>b.width>platform.bounds[0].width))
+ assert.ok(await auditPage.locator('#author').isVisible())
+ const noBadge=await auditPage.screenshot({fullPage:true})
+ const paint=await auditPage.evaluate(diffPngs,{a:originalBadge.toString('base64'),b:noBadge.toString('base64'),channel:32,badgeBounds:platform.paintBounds})
+ assert.ok(paint.exactDiffering>0)
+ assert.equal(paint.outsideBadgeDiffering,0)
+ const repeated=await auditPage.screenshot({fullPage:true})
+ const repeatDiff=await auditPage.evaluate(diffPngs,{a:noBadge.toString('base64'),b:repeated.toString('base64'),channel:32})
+ assert.equal(repeatDiff.exactDiffering,0)
  await auditPage.close()
  console.log('Browser smoke passed: lazy routes, original named TSX component and controls, editable field, history, responsive variant, direct URL.')
 }finally{await browser.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}

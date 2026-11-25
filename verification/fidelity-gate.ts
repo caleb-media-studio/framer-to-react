@@ -69,22 +69,45 @@ export async function diffPngs(args: { a: string; b: string; channel: number; ba
  * Run in the isolated source test page, never modify the editor or published site.
  * Do not hide author-created links, other fixed elements, or arbitrary pixel regions.
  */
-export function excludePlatformBadge(): {removed:number;bounds:{x:number;y:number;width:number;height:number}[]} {
+export function excludePlatformBadge(): {removed:number;bounds:Box[];paintBounds:Box[];unsupportedPaint:boolean} {
   const container=document.getElementById('__framer-badge-container');
-  if(!container||container.parentElement!==document.body||getComputedStyle(container).position!=='fixed'||getComputedStyle(container).pointerEvents!=='none')return {removed:0,bounds:[]};
-  const bounds:{x:number;y:number;width:number;height:number}[]=[];
+  if(!container||container.parentElement!==document.body||getComputedStyle(container).position!=='fixed'||getComputedStyle(container).pointerEvents!=='none')return {removed:0,bounds:[],paintBounds:[],unsupportedPaint:false};
+  const bounds:Box[]=[],paintBounds:Box[]=[];
+  let unsupportedPaint=false;
   for(const badge of Array.from(container.children)){
     if(!(badge instanceof HTMLAnchorElement)||!badge.classList.contains('__framer-badge')||badge.getAttribute('data-nosnippet')!=='true')continue;
     const target=new URL(badge.href,location.href);
     if(target.protocol!=='https:'||!['framer.com','www.framer.com'].includes(target.hostname)||target.pathname!=='/')continue;
     const r=badge.getBoundingClientRect();
     bounds.push({x:r.x,y:r.y,width:r.width,height:r.height});
+    // The platform anchor's own descendant paint includes outer box shadows.
+    // Derive a conservative finite blur support from the computed CSS; never
+    // expand by a project-specific constant or exclude candidate pixels.
+    for(const el of [badge,...badge.querySelectorAll('*')]){
+      const r=el.getBoundingClientRect(),css=getComputedStyle(el);
+      if(!r.width||!r.height||!el.checkVisibility())continue;
+      paintBounds.push({x:r.x,y:r.y,width:r.width,height:r.height});
+      if(css.filter!=='none'||css.textShadow!=='none'||css.outlineStyle!=='none'||['::before','::after'].some(p=>!['none','normal'].includes(getComputedStyle(el,p).content)))unsupportedPaint=true;
+      if(css.boxShadow==='none')continue;
+      const matrix=css.transform==='none'?null:new DOMMatrixReadOnly(css.transform);
+      if(matrix&&(matrix.a!==1||matrix.b!==0||matrix.c!==0||matrix.d!==1)){unsupportedPaint=true;continue}
+      for(const shadow of css.boxShadow.replace(/rgba?\([^)]*\)/g,'').split(',')){
+        if(/\binset\b/.test(shadow))continue;
+        const parts=shadow.trim().split(/\s+/);
+        if(parts.length<2||parts.length>4||parts.some(v=>!/^[-+]?(?:\d+(?:\.\d+)?|\.\d+)px$/.test(v))){unsupportedPaint=true;continue}
+        const [dx,dy,blur=0,spread=0]=parts.map(parseFloat);
+        // Chromium's Gaussian box-shadow blur uses sigma approximately blur/2;
+        // a two-blur-radius support conservatively includes its antialias edge.
+        const extent=Math.max(0,spread+2*blur);
+        paintBounds.push({x:r.x+dx-extent,y:r.y+dy-extent,width:r.width+2*extent,height:r.height+2*extent});
+      }
+    }
     badge.style.setProperty('display','none','important');
   }
-  return {removed:bounds.length,bounds};
+  return {removed:bounds.length,bounds,paintBounds,unsupportedPaint};
 }
 
-async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; rawBuf?:Buffer; platformBadge?:ReturnType<typeof excludePlatformBadge>; error?: string }> {
+async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; rawBuf?:Buffer; repeatBuf?:Buffer; platformBadge?:ReturnType<typeof excludePlatformBadge>; error?: string }> {
   const page = await browser.newPage({ viewport: { width, height: VIEWPORT_HEIGHT }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
   try {
     const res = await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
@@ -96,7 +119,8 @@ async function shoot(browser: Browser, url: string, width: number, file: string,
     const docH = await page.evaluate(() => document.documentElement.scrollHeight);
     const audit = await page.evaluate(collectRenderAudit,side);
     const buf = await page.screenshot({ path: file, fullPage: true });
-    return { audit,buf,rawBuf,platformBadge,docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
+    const repeatBuf=side==='source'?await page.screenshot({path:file.replace(/\.png$/,'.repeat.png'),fullPage:true}):undefined;
+    return { audit,buf,rawBuf,repeatBuf,platformBadge,docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
   } finally { await page.close(); }
 }
 
@@ -157,10 +181,13 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
   // Removing the exact platform anchor must not change any other rendered pixel.
   // Keep the full original and filtered images and their full candidate metrics
   // even when the source changes between captures; instability never counts as a pass.
-  const sourceStability=l.rawBuf?await blank.evaluate(diffPngs,{a:l.rawBuf.toString('base64'),b:l.buf.toString('base64'),channel:TOL.pixelChannel,badgeBounds:l.platformBadge?.bounds??[]}):null;
+  const sourceStability=l.rawBuf?await blank.evaluate(diffPngs,{a:l.rawBuf.toString('base64'),b:l.buf.toString('base64'),channel:TOL.pixelChannel,badgeBounds:l.platformBadge?.paintBounds??[]}):null;
+  const sourceRepeat=l.repeatBuf?await blank.evaluate(diffPngs,{a:l.buf.toString('base64'),b:l.repeatBuf.toString('base64'),channel:TOL.pixelChannel}):null;
   await blank.close();
   result.sourceStability=sourceStability;
-  if(!sourceStability||!sourceStability.sameDimensions||sourceStability.outsideBadgeDiffering!==0)unverified.push('source screenshot changed outside authorized platform badge bounds');
+  result.sourceRepeat=sourceRepeat;
+  if(!sourceRepeat||!sourceRepeat.sameDimensions||sourceRepeat.exactDiffering!==0)unverified.push('source repeated screenshot changed without any badge toggle');
+  if(!sourceStability||!sourceStability.sameDimensions||sourceStability.outsideBadgeDiffering!==0||l.platformBadge?.unsupportedPaint)unverified.push('source screenshot changed outside verified platform badge paint or paint unsupported');
   result.platformBadge=l.platformBadge;
   if(raw)result.unfilteredPixels={differing:raw.differing,exactDiffering:raw.exactDiffering,total:raw.total,ratio:raw.differing/raw.total,exactRatio:raw.exactDiffering/raw.total};
   const v = pixelVerdict(d.differing, d.total, [l.docH, p.docH]);
