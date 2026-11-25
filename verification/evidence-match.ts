@@ -1,5 +1,5 @@
-// Matches archive TextNodes to text containers observed on the published site, so published computed styles can be
-// attached as opt-in *evidence* for fields the Plugin API did not capture. Never produces a value for an unmatched node.
+// Matches archive TextNodes to text containers observed on the published site, for independent verification only.
+// Never supplies compiler input or produces a value for an unmatched node.
 
 import type {InlineTextRun} from "../src/types.ts";
 
@@ -12,6 +12,7 @@ export interface ArchiveText {
   /** Named ancestors from the breakpoint frame down (excluding the node itself). */
   ancestors: string[];
   siblingText?: string[];
+  ancestorContexts?: string[];
 }
 
 export interface LiveText {
@@ -26,13 +27,14 @@ export interface LiveText {
   hardBreakText?: string;
   inlineRuns?: InlineTextRun[];
   siblingText?: string[];
+  ancestorContexts?: string[];
 }
 
 export interface TextMatch {
   nodeId: string;
   liveIndex: number;
   confidence: Confidence;
-  method: 'name+text' | 'name+text+ancestors' | 'name+text+exact-ancestry' | 'name+text+siblings' | 'name+text+order' | 'text-only';
+  method: 'name+text' | 'name+text+ancestors' | 'name+text+exact-ancestry' | 'name+text+siblings' | 'name+text+ancestor-content' | 'name+text+order' | 'text-only';
 }
 
 export interface MatchResult {
@@ -44,7 +46,7 @@ export interface MatchResult {
 interface ArchiveNode {
   id: string;
   kind: string;
-  attributes?: { name?: string; width?: string; isBreakpoint?: boolean; visible?: boolean };
+  attributes?: { name?: string; width?: string; isBreakpoint?: boolean; visible?: boolean; editorVariantName?: string };
   text?: string | null;
   children?: ArchiveNode[];
 }
@@ -61,16 +63,40 @@ export function breakpointForWidth(root: ArchiveNode, width: number): ArchiveNod
 
 export function archiveTexts(frame: ArchiveNode): ArchiveText[] {
   const out: ArchiveText[] = [];
-  function walk(node: ArchiveNode, ancestors: string[], siblings: ArchiveNode[] = []): void {
-    if (node.attributes?.visible === false) return;
+  const hidden=(node:ArchiveNode)=>node.attributes?.visible===false||/^(Relative|Fixed)OverlayNode$/.test(node.kind);
+  const memo=new WeakMap<ArchiveNode,string[]>();
+  // Exact unordered text-content signature, bounded to small subtrees. This
+  // allows repeated rows to be distinguished by their other captured cells.
+  function contents(node:ArchiveNode):string[]{
+    if(memo.has(node))return memo.get(node)!;
+    const entries:string[]=[];
+    if(!hidden(node)){
+      if(node.kind==='TextNode'&&node.text?.trim())entries.push(JSON.stringify([node.attributes?.name??'',normalizeText(node.text)]));
+      for(const child of node.children??[]){
+        entries.push(...contents(child));
+        if(entries.length>64)break;
+      }
+    }
+    memo.set(node,entries);return entries;
+  }
+  function walk(node: ArchiveNode, ancestors: string[], siblings: ArchiveNode[] = [], lineage:ArchiveNode[]=[]): void {
+    if (hidden(node)) return;
     const name = node.attributes?.name ?? '';
     if (node.kind === 'TextNode' && node.text) {
-      const siblingText = siblings.filter(s => s !== node && s.attributes?.visible !== false && s.kind === 'TextNode' && s.text?.trim())
+      const siblingText = siblings.filter(s => s !== node && !hidden(s) && s.kind === 'TextNode' && s.text?.trim())
         .map(s => JSON.stringify([s.attributes?.name ?? '', normalizeText(s.text!)]));
-      out.push({ nodeId: node.id, name, text: normalizeText(node.text), ancestors, ...(siblingText.length ? {siblingText} : {}) });
+      const own=JSON.stringify([name,normalizeText(node.text)]);
+      const ancestorContexts=lineage.slice(-3).flatMap(parent=>{
+        const entries=contents(parent);
+        return parent.attributes?.name&&entries.length>=2&&entries.length<=64&&entries.some(x=>x!==own)
+          ?[JSON.stringify([parent.attributes.name,[...entries].sort()])]:[];
+      });
+      out.push({ nodeId: node.id, name, text: normalizeText(node.text), ancestors, ...(siblingText.length ? {siblingText} : {}), ...(ancestorContexts.length?{ancestorContexts}:{}) });
     }
-    const next = node === frame ? ancestors : [...ancestors, name];
-    for (const child of node.children ?? []) walk(child, next, node.children);
+    const variant=node.attributes?.editorVariantName;
+    const next = node === frame ? ancestors : [...ancestors, name,...(variant?[variant]:[])];
+    const parents=node!==frame&&name?[...lineage,node]:lineage;
+    for (const child of node.children ?? []) walk(child, next, node.children,parents);
   }
   walk(frame, []);
   return out;
@@ -135,6 +161,29 @@ export function matchTexts(archive: ArchiveText[], live: LiveText[]): MatchResul
       if (!key || as.filter(x=>siblingKey(x)===key).length!==1) continue;
       const exact = ls.filter(x=>siblingKey(x)===key);
       if(exact.length===1 && !usedL.has(exact[0].index)) take(a,exact[0],'high','name+text+siblings');
+    }
+    // Require exact full ancestry plus an exact ancestor text multiset which
+    // uniquely identifies this occurrence on BOTH original groups. The
+    // signature contains other text, not geometry or positional guesses.
+    const contextKeys=(t:ArchiveText|LiveText)=>t.ancestors.filter(n=>n.trim()).length>=2
+      ? [...new Set((t.ancestorContexts??[]).map(c=>JSON.stringify([pathKey(t),c])))]:[];
+    const aKeys=new Map(as.map(a=>[a,contextKeys(a)]));
+    const lKeys=new Map(ls.map(l=>[l,contextKeys(l)]));
+    const edges=new Map<ArchiveText,Set<LiveText>>();
+    for(const a of as){
+      const candidates=new Set<LiveText>();
+      for(const k of aKeys.get(a)!){
+        if(as.filter(x=>aKeys.get(x)!.includes(k)).length!==1)continue;
+        const exact=ls.filter(x=>lKeys.get(x)!.includes(k));
+        if(exact.length===1)candidates.add(exact[0]);
+      }
+      edges.set(a,candidates);
+    }
+    for(const [a,candidates] of edges){
+      if(usedA.has(a.nodeId)||candidates.size!==1)continue;
+      const l=[...candidates][0];
+      if(!usedL.has(l.index)&&[...edges.values()].filter(es=>es.has(l)).length===1)
+        take(a,l,'high','name+text+ancestor-content');
     }
     // Partial ancestor overlap and document order remain diagnostic only.
     for (const a of as) {

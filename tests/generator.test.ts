@@ -50,3 +50,22 @@ test('recursively exports descendants and text', async () => {
   assert.equal(result!.children![0].text, 'Test text')
   assert.equal(state.count, 2)
 })
+
+test('intrinsic fit text does not clamp to a narrow parent; explicit constraints and frame sizing remain',()=>{
+ const b=generateBundle({roots:[{id:'frame',kind:'FrameNode',attributes:{width:'fit-content',layout:'stack'},children:[
+  {id:'fit',kind:'TextNode',text:'An intrinsic label',attributes:{width:'fit-content',height:'fit-content'}},
+  {id:'bounded',kind:'TextNode',text:'A constrained label',attributes:{width:'fit-content',maxWidth:'100px'}},
+  {id:'fluid',kind:'TextNode',text:'A fluid paragraph',attributes:{width:'100%'}}
+ ]}]})
+ assert.equal((b.css.match(/width: max-content;/g)||[]).length,2)
+ assert.match(b.css,/width: fit-content;/)
+ assert.match(b.css,/max-width: 100px;/)
+ assert.match(b.css,/width: 100%;/)
+})
+
+test('original OpenType feature selections are preserved and unsafe feature names are rejected',()=>{
+ const b=generateBundle({roots:[{id:'a',kind:'TextNode',text:'Example',attributes:{openTypeFontFeatures:{cv03:'on',liga:'off',ss01:2}}},{id:'b',kind:'TextNode',text:'Invalid',attributes:{openTypeFontFeatures:{'x; color:red':'on'}}}]})
+ assert.match(b.css,/font-feature-settings: "cv03" 1, "liga" 0, "ss01" 2;/)
+ assert.equal((b.css.match(/font-feature-settings:/g)||[]).length,1)
+ assert.doesNotMatch(b.css,/color:red/)
+})

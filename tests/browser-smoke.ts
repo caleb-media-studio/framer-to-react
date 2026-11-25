@@ -1,5 +1,5 @@
 import {collectLive} from '../verification/evidence-sidecar.ts'
-import {collectPreview} from '../verification/fidelity-gate.ts'
+import {collectPreview,diffPngs,excludePlatformBadge} from '../verification/fidelity-gate.ts'
 import {compareStyle} from '../verification/fidelity-compare.ts'
 import {collectRenderAudit,compareRenderAudit} from '../verification/render-audit.ts'
 import assert from 'node:assert/strict'
@@ -34,6 +34,27 @@ try{
  await page.locator('[data-demo-badge]').waitFor()
  assert.equal(await page.locator('[data-demo-badge]').textContent(),'Ready')
  assert.equal(requests.size,1,'only active page chunk loaded')
+ const intrinsic=await page.locator('[data-f2a-node="page-0-1200-intrinsic"]').boundingBox()
+ const bounded=await page.locator('[data-f2a-node="page-0-1200-bounded"]').boundingBox()
+ assert.ok(intrinsic&&bounded)
+ assert.ok(intrinsic.width>100,'intrinsic source text retains natural width inside narrow clipped parent')
+ assert.ok(bounded.width<=100&&bounded.height>intrinsic.height,'captured max width still causes wrapping')
+ const vector=page.locator('svg[data-f2a-node="page-0-1200-vector"]')
+ const vectorBox=await vector.boundingBox()
+ assert.ok(vectorBox&&vectorBox.width===20&&vectorBox.height===20)
+ assert.equal(await vector.locator('path').evaluate(el=>getComputedStyle(el).stroke),'rgb(18, 52, 86)')
+ assert.equal(await vector.locator('path').evaluate(el=>getComputedStyle(el).strokeWidth),'1.5px')
+ assert.equal(await vector.evaluate(el=>getComputedStyle(el).maskImage),'none')
+ const hover=page.locator('nav[data-f2a-node="page-0-1200-hover"]')
+ assert.equal(await hover.getAttribute('aria-label'),'Hover test')
+ assert.equal(await hover.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(17, 17, 17)')
+ await hover.hover()
+ await page.waitForFunction(()=>{const el=document.querySelector('nav[data-f2a-node="page-0-1200-hover"]');return el&&getComputedStyle(el).backgroundColor==='rgb(255, 255, 255)'&&getComputedStyle(el).opacity==='0.8'})
+ await page.mouse.move(0,0)
+ await page.waitForFunction(()=>{const el=document.querySelector('nav[data-f2a-node="page-0-1200-hover"]');return el&&getComputedStyle(el).backgroundColor==='rgb(17, 17, 17)'})
+
+
+
  const input=page.locator('.exported-page input[type=email]')
  await input.fill('person@example.test')
  assert.equal(await input.inputValue(),'person@example.test')
@@ -92,6 +113,41 @@ try{
  const [mixed]=await auditPage.evaluate(collectLive,props)
  assert.equal(mixed.style.fontSize,'16px')
  assert.deepEqual(mixed.inlineRuns?.map(r=>[r.text,r.style.fontSize??mixed.style.fontSize]),[['Small','12px'],['Large','16px']])
+ // Source stability is independent of candidate fidelity. Only changes within
+ // the known platform badge rectangle are allowed in this diagnostic.
+ const image=await auditPage.evaluate(()=>{
+  const c=document.createElement('canvas');c.width=8;c.height=8;
+  const ctx=c.getContext('2d')!;ctx.fillStyle='black';ctx.fillRect(0,0,8,8);
+  const a=c.toDataURL().split(',')[1];
+  ctx.fillStyle='white';ctx.fillRect(1,1,2,2);
+  const badgeOnly=c.toDataURL().split(',')[1];
+  ctx.fillRect(7,7,1,1);
+  return {a,badgeOnly,changed:c.toDataURL().split(',')[1]}
+ })
+ const bounds=[{x:1,y:1,width:2,height:2}]
+ const badgeDiff=await auditPage.evaluate(diffPngs,{a:image.a,b:image.badgeOnly,channel:32,badgeBounds:bounds})
+ assert.equal(badgeDiff.exactDiffering,4)
+ assert.equal(badgeDiff.outsideBadgeDiffering,0)
+ const unstable=await auditPage.evaluate(diffPngs,{a:image.a,b:image.changed,channel:32,badgeBounds:bounds})
+ assert.equal(unstable.exactDiffering,5)
+ assert.equal(unstable.outsideBadgeDiffering,1)
+ const full=await auditPage.evaluate(diffPngs,{a:image.a,b:image.changed,channel:32})
+ assert.equal(full.exactDiffering,5)
+ assert.equal(full.outsideBadgeDiffering,5)
+ await auditPage.setContent('<style>body{margin:0;background:black}#__framer-badge-container{position:fixed;pointer-events:none;bottom:10px;right:10px}.__framer-badge{display:block;width:80px;height:30px;background:white}.__framer-badge>div{width:100%;height:100%;box-shadow:0 4px 8px 0 #fff}</style><a id="author" href="https://framer.com/">Author link</a><div id="__framer-badge-container"><a class="__framer-badge" data-nosnippet="true" href="https://framer.com/"><div></div></a></div>')
+ const originalBadge=await auditPage.screenshot({fullPage:true})
+ const platform=await auditPage.evaluate(excludePlatformBadge)
+ assert.equal(platform.removed,1)
+ assert.equal(platform.unsupportedPaint,false)
+ assert.ok(platform.paintBounds.some(b=>b.width>platform.bounds[0].width))
+ assert.ok(await auditPage.locator('#author').isVisible())
+ const noBadge=await auditPage.screenshot({fullPage:true})
+ const paint=await auditPage.evaluate(diffPngs,{a:originalBadge.toString('base64'),b:noBadge.toString('base64'),channel:32,badgeBounds:platform.paintBounds})
+ assert.ok(paint.exactDiffering>0)
+ assert.equal(paint.outsideBadgeDiffering,0)
+ const repeated=await auditPage.screenshot({fullPage:true})
+ const repeatDiff=await auditPage.evaluate(diffPngs,{a:noBadge.toString('base64'),b:repeated.toString('base64'),channel:32})
+ assert.equal(repeatDiff.exactDiffering,0)
  await auditPage.close()
  console.log('Browser smoke passed: lazy routes, original named TSX component and controls, editable field, history, responsive variant, direct URL.')
 }finally{await browser.close();await new Promise<void>(resolve=>server.close(()=>resolve()))}

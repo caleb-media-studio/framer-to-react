@@ -1,0 +1,83 @@
+import {deriveEditorRichText,hasExplicitRunProperty} from './editor-rich-text.ts'
+import type {ArchiveFiles,Manifest,Snapshot,DesignNode} from './types.ts'
+import type {OfficialDocument,OfficialNode} from './official-layouts.ts'
+export const EDITOR_SOURCE='library/editor-source.json'
+export interface EditorSource extends Omit<OfficialDocument,'format'> {
+ format:'framer-to-agent/editor-source-v1'
+ adapter:'framer-authorized-tree-api'
+ projectId:string
+ branch:string
+ scope:{pages:string[];layouts:'all'}
+ text:OfficialNode[]
+}
+export function parseEditorSource(value:unknown,manifest:Manifest):EditorSource{
+ if(!value||typeof value!=='object')throw Error('Invalid editor capture')
+ const d=value as EditorSource
+ if(d.format!=='framer-to-agent/editor-source-v1'||d.adapter!=='framer-authorized-tree-api'||typeof d.projectId!=='string'||!d.projectId||typeof d.branch!=='string'||!Array.isArray(d.pages)||!Array.isArray(d.templates)||!Array.isArray(d.text)||!Array.isArray(d.scope?.pages)||d.scope.layouts!=='all')throw Error('Invalid editor capture format')
+ const bindings=new Map(d.pages.map(p=>[p.id,p]))
+ if(bindings.size!==d.pages.length)throw Error('Duplicate editor page identity')
+ for(const page of manifest.pages??[]){
+  const b=bindings.get(page.id??'')
+  if(!b||b.path!==page.path)throw Error('Editor capture page identity mismatch: '+page.path)
+ }
+ const ids=new Set(d.templates.map(t=>t.id))
+ if(ids.size!==d.templates.length||d.pages.some(p=>p.layout&&!ids.has(p.layout)))throw Error('Incomplete editor layout capture')
+ const scopes=new Set(d.scope.pages)
+ if(scopes.size!==d.scope.pages.length)throw Error("Duplicate editor text capture scope")
+ for(const id of scopes)if(!bindings.has(id))throw Error('Unknown editor capture scope')
+ const seen=new Set<string>()
+ for(const t of d.text){
+  if(t.type!=='RichTextNode'||typeof t.id!=='string'||typeof t.$scopeId!=='string'||!scopes.has(t.$scopeId)||typeof t.$groundNodeId!=='string'||typeof t.text!=='string'||t.$truncated)throw Error('Invalid editor text record')
+  const page=manifest.pages?.find(p=>p.id===t.$scopeId)
+  if(!page?.breakpoints?.some(b=>b.id===t.$groundNodeId))throw Error('Editor text breakpoint mismatch: '+t.id)
+  const key=JSON.stringify([t.$scopeId,t.$groundNodeId,t.id])
+  if(seen.has(key))throw Error('Duplicate editor text identity')
+  seen.add(key)
+ }
+ return d
+}
+const styleFields=['fontSize','fontWeight','fontStyle','fontName','lineHeight','letterSpacing','textColor','textAlign','textAlignment','textTransform','textDecoration','openTypeFontFeatures','tag'] as const
+export function createEditorTextResolver(d:EditorSource,nodeResolver?:import('./editor-nodes.ts').EditorNodeResolver){
+ const nodes=new Map(d.text.map(t=>[JSON.stringify([t.$scopeId,t.$groundNodeId,t.id]),t]))
+ const applied=new Set<string>(),conflicts=new Set<string>(),complex=new Set<string>()
+ const observed=new Map<string,{pageId:string;breakpointId:string;nodeId:string;missing:string[];matched:boolean}>()
+ const resolve=(snapshot:Snapshot,pageId:string):Snapshot=>{
+  const visit=(node:DesignNode,bp:string):DesignNode=>{
+   const key=JSON.stringify([pageId,bp,node.id]),t=nodes.get(key)
+   const rich=t?deriveEditorRichText(t):null
+   let current=nodeResolver?.resolve(node,pageId,bp)??node
+   if(node.kind==='TextNode'||node.kind==='RichTextNode'){
+    const a=node.attributes??{}, inline=a.inlineTextStyle??{}
+    const missing:string[]=[]
+    if(!t?.fontSize&&!hasExplicitRunProperty(rich,'fontSize')&&!inline.fontSize&&!a.fontSize)missing.push('fontSize')
+    if(!t?.textColor&&!hasExplicitRunProperty(rich,'textColor')&&!inline.color&&!inline.textColor&&!a.textColor&&!a.color)missing.push('textColor')
+    if(!t?.fontName&&!hasExplicitRunProperty(rich,'fontName')&&!a.font?.family&&!inline.font?.family&&!a.fontFamily)missing.push('fontFamily')
+    if(t?.fontWeight==null&&!hasExplicitRunProperty(rich,'fontWeight')&&a.font?.weight==null&&a.fontWeight==null&&inline.fontWeight==null)missing.push('fontWeight')
+    observed.set(key,{pageId,breakpointId:bp,nodeId:node.id,missing,matched:!!t})
+   }
+   if(t&&(node.kind==='TextNode'||node.kind==='RichTextNode')){
+    if(node.text!==t.text&&String(node.text??'').replace(/\n/g,'')!==t.text.replace(/\n/g,''))conflicts.add(key)
+    else{
+     const a:import("./types.ts").Attributes={...node.attributes,editorTextSource:true},font={...a.font}
+     const resolved={...rich?.base,...t}
+     for(const field of styleFields)if(resolved[field]!==undefined&&resolved[field]!==null)a[field]=resolved[field]
+     if(typeof t.textWrap==='string')a.textWrap=t.textWrap
+     if(rich)a.editorRichText=rich
+     if(typeof resolved.fontName==='string')font.family=resolved.fontName
+     if(typeof resolved.fontWeight==='number')font.weight=resolved.fontWeight
+     if(typeof resolved.fontStyle==='string')font.style=resolved.fontStyle
+     a.font=font
+     const inline={...a.inlineTextStyle}
+     for(const [from,to] of [['fontSize','fontSize'],['lineHeight','lineHeight'],['letterSpacing','letterSpacing'],['textColor','color'],['textAlignment','alignment'],['textAlign','alignment'],['textDecoration','decoration'],['textTransform','transform']] as const)if(resolved[from]!=null)inline[to]=resolved[from]
+     if(Object.keys(inline).length)a.inlineTextStyle=inline
+     if((t.children??[]).length>1||(t.children??[]).some(b=>(b.children??[]).length>1))complex.add(key)
+     applied.add(key);current={...node,attributes:a,text:t.text}
+    }
+   }
+   return {...current,children:(current.children??[]).map(c=>visit(c,bp))}
+  }
+  return {...snapshot,roots:snapshot.roots.map(r=>visit(r,r.id))}
+ }
+ return {resolve,report:()=>({captured:nodes.size,applied:applied.size,unmatched:[...nodes.keys()].filter(k=>!applied.has(k)&&!conflicts.has(k)),conflicts:[...conflicts],complexRuns:[...complex],scope:d.scope,coverage:[...observed.values()],nodeScope:nodeResolver?.scope??[],...(nodeResolver?{nodes:nodeResolver.report()}:{})})}
+}
+

@@ -1,3 +1,6 @@
+import {nativeVector} from './native-vector.ts'
+import type {EditorRichText} from './editor-rich-text.ts'
+import type {ColorResolver} from './design-tokens.ts'
 import {validateInlineRuns} from './inline-text.ts'
 import type {Attributes,DesignNode,Snapshot,Axis,CSSProperties,RenderOptions,CodeImport,ReusableBlock,NativeField} from './types.ts'
 import {svgMarkup, svgPath, inheritsIconColor} from './vectors.ts'
@@ -18,8 +21,14 @@ function cssLen(v: any):string|null {
   }
   return null
 }
+function fontFeatures(value:unknown):string|null{
+  if(!value||typeof value!=='object'||Array.isArray(value))return null
+  const pairs=Object.entries(value)
+  if(!pairs.length||pairs.some(([tag,v])=>!/^[A-Za-z0-9]{4}$/.test(tag)||!(v==='on'||v==='off'||typeof v==='number'&&Number.isInteger(v)&&v>=0)))return null
+  return pairs.map(([tag,v])=>JSON.stringify(tag)+' '+(v==='on'?1:v==='off'?0:v)).join(', ')
+}
 function cssColor(value: any):string|null {
-  const v = typeof value === 'string' ? value : value?.color ?? value?.value
+  const v = typeof value === 'string' ? value : value?.light ?? value?.color ?? value?.value ?? value?.dark
   if (typeof v !== 'string') return null
   const s = v.trim()
   if (/^var\(--[A-Za-z0-9_-]+\)$/.test(s)) return s
@@ -86,12 +95,15 @@ function stackAxis(node:DesignNode|null|undefined):Axis {
   const d = String(a.stackDirection || 'vertical').toLowerCase()
   return d === 'horizontal' || d === 'row' ? 'row' : 'column'
 }
-function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
+function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null, resolveCapturedColor?:ColorResolver) {
   const a = node.attributes || {}
+  const color=(v:unknown,field:string)=>resolveCapturedColor?.(v,node,field)??cssColor(v)
   const s:CSSProperties = {}
   const tw:string[] = []
   const put = (k:string,v:string|null|undefined) => { if (v != null && v !== '') s[k] = v }
   if (a.visible === false) tw.push('hidden')
+  if (/^(auto|default|pointer|text|move|grab|grabbing|not-allowed|crosshair|help|wait|progress|none)$/.test(a.cursor)) put('cursor', a.cursor)
+  if (a.pointerEvents==='none'||a.pointerEvents==='auto') put('pointer-events',a.pointerEvents)
   if (a.position && ['relative','absolute','fixed','sticky'].includes(a.position)) tw.push(unplacedAbsolute(a, unhydrated) ? 'relative' : a.position)
   if (a.layout === 'stack') {
     tw.push('flex')
@@ -138,10 +150,10 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
   }
   put('gap', pad(a.gap))
   put('padding', pad(a.padding))
-  put('background-color', cssColor(a.backgroundColor))
+  put('background-color', color(a.backgroundColor,'backgroundColor'))
   // Only when Framer's public text API omits colors: inherit readable text
   // from the nearest solid surface instead of browser-default black on black.
-  const hex = /^#([0-9a-f]{6})$/i.exec(String(a.backgroundColor || ''))
+  const hex = /^#([0-9a-f]{6})$/i.exec(String(typeof a.backgroundColor==='object'?a.backgroundColor?.light:a.backgroundColor || ''))
   if (hex) {
     const rgb=[0,2,4].map(i=>parseInt(hex[1].slice(i,i+2),16)/255)
     const light=rgb.map(x=>x<=0.04045?x/12.92:((x+0.055)/1.055)**2.4)
@@ -154,7 +166,12 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
   put('border-radius', pad(a.borderRadius))
   if (a.border && typeof a.border === 'object') {
     const bw = cssLen(a.border.width)
-    const color = cssColor(a.border.color)
+    const color = resolveCapturedColor?.(a.border.color,node,'border.color')??cssColor(a.border.color)
+    const style=/^(solid|dashed|dotted|double)$/.test(a.border.style)?a.border.style:'solid'
+    const widths:string[]=typeof a.border.width==='string'?a.border.width.trim().split(/\s+/):[]
+    if(!bw&&color&&widths.length>=2&&widths.length<=4&&widths.every(v=>/^(?:0|\d+(?:\.\d+)?(?:px|em|rem))$/.test(v))){
+      put('border-width',widths.join(' '));put('border-style',style);put('border-color',color)
+    }
     if (bw && color) put('border', `${bw} ${/^(solid|dashed|dotted|double)$/.test(a.border.style) ? a.border.style : 'solid'} ${color}`)
   } else if (typeof a.border === 'string' && /^\d/.test(a.border)) put('border', a.border)
   if (typeof a.opacity === 'number' && a.opacity >= 0 && a.opacity < 1) put('opacity', String(a.opacity))
@@ -180,21 +197,28 @@ function asCSS(node:DesignNode, unhydrated = false, parentAxis:Axis = null) {
     // Opt-in published reference (src/enrichment.ts); only fills fields the editor capture lacks.
     const ref = node.reference?.textStyle || {}
     const whiteSpace = ts.whiteSpace ?? a.whiteSpace ?? ref.whiteSpace
-    // The source treats intrinsic fit-content labels as non-wrapping unless evidence says otherwise.
+    // Framer Fit text measures its intrinsic width, even in a narrower stack.
+    // CSS fit-content instead clamps to available width and may add a line.
+    // Explicit min/max widths and hard breaks still apply.
+    if (s.width === 'fit-content') put('width', 'max-content')
     put('white-space', /^(pre|pre-wrap|pre-line|normal|nowrap|break-spaces)$/.test(whiteSpace) ? whiteSpace : 'pre-wrap')
+    if(/^(balance|pretty|wrap|nowrap)$/.test(a.textWrap))put('text-wrap',a.textWrap)
     const font = a.font || {}
     const family = font.family || ts.font?.family || a.fontName || a.fontFamily
     put('font-family', typeof family === 'string' ? JSON.stringify(family) : null)
     put('font-weight', cssVal(font.weight ?? ts.font?.weight ?? ts.fontWeight ?? a.fontWeight))
+    put('font-feature-settings',fontFeatures(a.openTypeFontFeatures))
     const fontStyle=font.style??ts.font?.style??ts.fontStyle??a.fontStyle
     if(/^(normal|italic|oblique)$/.test(fontStyle))put('font-style',fontStyle)
     const decoration=ts.decoration??ts.textDecoration??a.textDecoration
     if(/^(none|underline|line-through|overline)$/.test(decoration))put('text-decoration-line',decoration)
     put('font-size', cssLen(ts.fontSize ?? a.fontSize ?? ref.fontSize))
-    put('line-height', cssLen(ts.lineHeight ?? a.lineHeight ?? ref.lineHeight))
+    // Framer's RichText renderer defaults to 1.2em when line-height is omitted.
+    // Tailwind's inherited 1.5 changes intrinsic text height and shifts following layers.
+    put('line-height', cssLen(ts.lineHeight ?? a.lineHeight ?? ref.lineHeight ?? (a.editorTextSource ? '1.2em' : undefined)))
     put('letter-spacing', cssLen(ts.letterSpacing ?? a.letterSpacing ?? ref.letterSpacing))
     // Framer TextStyle colors may be ColorStyle objects ({light, dark}).
-    put('color', cssColor(ts.color?.light || ts.color || ts.textColor || a.textColor || a.color || ref.color))
+    put('color', color(ts.color || ts.textColor || a.textColor || a.color || ref.color,'textColor'))
     const transform = ts.transform || ref.textTransform
     if (/^(uppercase|lowercase|capitalize)$/.test(transform)) put('text-transform', transform)
     const textAlign = ts.alignment || ts.textAlign || a.textAlignment || a.textAlign || ref.textAlign
@@ -235,13 +259,22 @@ export function expandCanvasInstance(instance:DesignNode, component:DesignNode|n
   const variants = (component?.children || []).filter(v => v && v.kind === 'FrameNode')
   if (!variants.length) return null
   const ia = instance.attributes || {}
-  const variant = variants.find(v => v.id === ia.controls?.variant) || variants[0]
+  const selected=ia.controls?.variant??component?.attributes?.defaultVariantId
+  const variant=selected==null?variants[0]:variants.find(v=>v.id===selected)
+  if(!variant){if(component?.attributes?.editorComponentId)throw Error('Unresolved captured component variant '+String(selected));return null}
+  if(ia.editorComponentId&&component?.attributes?.editorComponentId&&ia.editorComponentId!==component.attributes.editorComponentId)throw Error('Captured component instance identity mismatch')
   const attributes:Attributes = {...variant.attributes}
+  // Preserve the authoritative variant wrapper name independently of the instance name.
+  if(component?.attributes?.editorComponentId&&typeof variant.attributes?.name==='string'&&variant.attributes.name)attributes.editorVariantName=variant.attributes.name
   for (const key of OFFSET_KEYS) delete attributes[key]
   for (const key of ['name','position','width','height','visible','opacity','rotation',...OFFSET_KEYS]) if (ia[key] !== undefined) attributes[key] = ia[key]
   // Definition IDs repeat for every instance. Use stable occurrence IDs so evidence
   // never applies one instance's text style to an unrelated placement.
-  const scope=(n:DesignNode):DesignNode=>({...n,id:instance.id+'::'+encodeURIComponent(n.id),children:(n.children||[]).map(scope)})
+  const scope=(n:DesignNode):DesignNode=>{
+    const ref=n.attributes?.editorTextReference
+    const value=ref&&ref.providerId===component?.attributes?.editorComponentId?ia.controls?.[ref.id]:undefined
+    return {...n,id:instance.id+'::'+encodeURIComponent(n.id),...(typeof value==='string'?{text:value}:{}),children:(n.children||[]).map(scope)}
+  }
   return {...variant, id: instance.id, kind: 'FrameNode', attributes, children: (variant.children || []).map(scope)}
 }
 // Read-only expansion for matching and indexing. Uses exactly the renderer's variant
@@ -270,7 +303,7 @@ export function inFlowRoot(root:DesignNode) {
  // This is semantic inference, not a claim that the original has functional form behavior.
 export function nativeField(node:DesignNode, parent:DesignNode|null|undefined):NativeField|null {
   const a=node?.attributes || {}, name=String(a.name||'')
-  if(node?.kind!=='FrameNode'||a.visible===false||a.link||a.layout!=='stack'||!/(^|[ /·_-])input([ /·_-]|$)/i.test(name))return null
+  if(node?.kind!=='FrameNode'||a.editorKind==='FrameNode'||a.visible===false||a.link||a.layout!=='stack'||!/(^|[ /·_-])input([ /·_-]|$)/i.test(name))return null
   const visible=(node.children||[]).filter(c=>c.attributes?.visible!==false)
   const text=visible.filter((c):c is DesignNode & {text:string}=>c.kind==='TextNode'&&typeof c.text==='string'&&!!c.text.trim()&&!c.attributes?.link)
   if(text.length!==1||visible.some(c=>c!==text[0]&&(!['ComponentInstanceNode','SVGNode','IconNode'].includes(c.kind)||!/(^|[ /·_-])icon([ /·_-]|$)/i.test(c.attributes?.name||'')||c.children?.length)))return null
@@ -325,19 +358,45 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     const cls = `f2a-${namespace}-${id}`
     const attrs = node.attributes || {}
     if(options.layoutSlot && node.kind==='PlaceholderNode')return '  '.repeat(depth)+'{children}'
-    const {tw, css: localCss} = asCSS(node, unhydrated, parentAxis)
+    const {tw, css: localCss} = asCSS(node, unhydrated, parentAxis, options.resolveCapturedColor)
     // Framer frame borders are painted over the frame, not included in its layout box.
     // Preserve child padding and stack geometry while matching the visible border.
     const edgeBorders:CSSProperties={}
     for(const side of ['Top','Right','Bottom','Left']){
       const value=attrs['border'+side]
-      if(typeof value==='string'&&/^\d+(?:\.\d+)?px (solid|dashed|dotted|double) (#[0-9a-f]{3,8}|rgba?\([\d.,%\s]+\))$/i.test(value))edgeBorders['border-'+side.toLowerCase()]=value
+      if(typeof value==='string'){const match=/^(\d+(?:\.\d+)?px) (solid|dashed|dotted|double) (.+)$/.exec(value);if(match){const color=options.resolveCapturedColor?.(match[3],node,'border'+side)??cssColor(match[3]);if(color)edgeBorders['border-'+side.toLowerCase()]=match[1]+' '+match[2]+' '+color}}
     }
-    const overlayBorder = localCss.border
-    if ((overlayBorder||Object.keys(edgeBorders).length) && node.kind === 'FrameNode') {
-      delete localCss.border
+    const overlayBorder:CSSProperties={}
+    for(const k of ['border','border-width','border-style','border-color'])if(localCss[k])overlayBorder[k]=localCss[k]
+    if ((Object.keys(overlayBorder).length||Object.keys(edgeBorders).length) && node.kind === 'FrameNode') {
+      for(const k of Object.keys(overlayBorder))delete localCss[k]
       if (!tw.some(v => ['relative','absolute','fixed','sticky'].includes(v))) tw.push('relative')
-      css[`.${cls}::after`] = {content:'""',position:'absolute',inset:'0',...(overlayBorder?{border:overlayBorder}:{}),...edgeBorders,'border-radius':'inherit','box-sizing':'border-box','pointer-events':'none'}
+      css[`.${cls}::after`] = {content:'""',position:'absolute',inset:'0',...overlayBorder,...edgeBorders,'border-radius':'inherit','box-sizing':'border-box','pointer-events':'none'}
+    }
+    const hover=attrs.hoverEffect
+    if(hover&&typeof hover==='object'&&hover.transition?.type==='tween'){
+      const state:CSSProperties={}
+      const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)
+      const distance=(v:unknown)=>finite(v)?v+'px':typeof v==='string'&&/^-?\d+(?:\.\d+)?px$/.test(v)?v:null
+      const angle=(v:unknown)=>finite(v)?v+'deg':typeof v==='string'&&/^-?\d+(?:\.\d+)?deg$/.test(v)?v:null
+      const duration=(v:unknown)=>typeof v==='string'&&/^\d+(?:\.\d+)?(?:ms|s)$/.test(v)?v:null
+      const x=distance(hover.x),y=distance(hover.y),rotate=angle(hover.rotate),sx=angle(hover.skewX),sy=angle(hover.skewY)
+      const transforms:string[]=[]
+      if(x&&y&&(parseFloat(x)!==0||parseFloat(y)!==0))transforms.push('translate('+x+', '+y+')')
+      if(rotate&&parseFloat(rotate)!==0)transforms.push('rotate('+rotate+')')
+      if(finite(hover.scale)&&hover.scale!==1&&hover.scale>=0)transforms.push('scale('+hover.scale+')')
+      if(sx&&parseFloat(sx)!==0)transforms.push('skewX('+sx+')')
+      if(sy&&parseFloat(sy)!==0)transforms.push('skewY('+sy+')')
+      if(transforms.length)state.transform=[localCss.transform,...transforms].filter(Boolean).join(' ')
+      if(finite(hover.opacity)&&hover.opacity>=0&&hover.opacity<=1)state.opacity=String(hover.opacity)
+      const background=options.resolveCapturedColor?.(hover.backgroundColor,node,'hoverEffect.backgroundColor')??cssColor(hover.backgroundColor)
+      if(background)state['background-color']=background
+      const time=duration(hover.transition.duration),delay=duration(hover.transition.delay)
+      const ease=hover.transition.ease
+      if(time&&delay&&Array.isArray(ease)&&ease.length===4&&ease.every(finite)&&ease[0]>=0&&ease[0]<=1&&ease[2]>=0&&ease[2]<=1&&Object.keys(state).length){
+        localCss.transition=Object.keys(state).map(k=>k+' '+time+' cubic-bezier('+ease.join(', ')+') '+delay).join(', ')
+        css['.'+cls+':hover']=state
+      }
     }
     if (Object.keys(localCss).length) css[`.${cls}`] = localCss
     const className = [...tw, cls].join(' ')
@@ -366,9 +425,28 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
     }
     const ownField = nativeField(node,parent)
     const runs = !node.richTextHTML && !attrs.inlineTextStyle ? validateInlineRuns(node.reference?.inlineRuns,textWithLayerBreaks(node)) : null
-    const content = runs ? runs.map(r=>Object.keys(r.style).length ? '<span style={'+JSON.stringify(r.style)+'}>{'+JSON.stringify(r.text)+'}</span>' : '{'+JSON.stringify(r.text)+'}').join('') : typeof node.text === 'string'
+    const rich=attrs.editorRichText as EditorRichText|undefined
+    const sourceStyle=(v:Record<string,unknown>)=>{
+      const result:Record<string,string>={}
+      const put=(k:string,x:string|null|undefined)=>{if(x!=null)result[k]=x}
+      if(typeof v.fontName==='string')put('fontFamily',v.fontName)
+      put('fontSize',cssLen(v.fontSize));put('fontWeight',cssVal(v.fontWeight));put('fontFeatureSettings',fontFeatures(v.openTypeFontFeatures))
+      if(typeof v.fontStyle==='string'&&/^(normal|italic|oblique)$/.test(v.fontStyle))put('fontStyle',v.fontStyle)
+      put('letterSpacing',cssLen(v.letterSpacing))
+      put('lineHeight',cssLen(v.lineHeight))
+      put('color',options.resolveCapturedColor?.(v.textColor,node,'richTextRun.color')??cssColor(v.textColor))
+      if(typeof v.textDecoration==='string'&&/^(none|underline|line-through|overline)$/.test(v.textDecoration))put('textDecorationLine',v.textDecoration)
+      if(typeof v.textTransform==='string'&&/^(none|uppercase|lowercase|capitalize)$/.test(v.textTransform))put('textTransform',v.textTransform)
+      return result
+    }
+    const richContent=rich&&rich.blocks.length===1&&rich.blocks[0].runs.length>1?rich.blocks[0].runs.map(r=>{
+      if(r.lineBreak)return '<br />'
+      const style=sourceStyle(r.style??{})
+      return '<span style={'+JSON.stringify(style)+'}>{'+JSON.stringify(r.text??'')+'}</span>'
+    }).join(''):null
+    const content = richContent??(runs ? runs.map(r=>Object.keys(r.style).length ? '<span style={'+JSON.stringify(r.style)+'}>{'+JSON.stringify(r.text)+'}</span>' : '{'+JSON.stringify(r.text)+'}').join('') : typeof node.text === 'string'
       ? `{${JSON.stringify(textWithLayerBreaks(node))}}`
-      : (node.children || []).map(child => render(child, depth + 1, stackAxis(node), node, ownField)).join('\n')
+      : (node.children || []).map(child => render(child, depth + 1, stackAxis(node), node, ownField)).join('\n'))
     const inlineSvg = svgMarkup(node) || options.resolveCapturedIcon?.(node) || null
     if (inlineSvg) {
       const svgSource = '/' + svgPath(inlineSvg)
@@ -378,7 +456,10 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
         const maskWidth = /^(\d+(?:\.\d+)?)(?:px|rem|em)$/.test(String(attrs.width)) ? attrs.width : '24px'
         const maskHeight = /^(\d+(?:\.\d+)?)(?:px|rem|em)$/.test(String(attrs.height)) ? attrs.height : maskWidth
         const controlColor = Object.values(attrs.controls || {}).find(v => cssColor(v))
-        const iconColor = cssColor(attrs.textColor || attrs.color || controlColor) || 'inherit'
+        const capturedColor=attrs.textColor || attrs.color || controlColor
+        const iconColor = options.resolveCapturedColor?.(capturedColor,node,'iconColor') || cssColor(capturedColor) || 'inherit'
+        const native=nativeVector(inlineSvg)
+        if(native)return `${indent}<svg ${classAttr}${native.attributes} role="img" aria-label=${JSON.stringify(label)} data-f2a-vector-asset=${JSON.stringify(svgSource)} style={{ display: ${JSON.stringify(attrs.visible === false ? "none" : "inline-block")}, width: ${JSON.stringify(maskWidth)}, height: ${JSON.stringify(maskHeight)}, color: ${JSON.stringify(iconColor)} }}>${native.children}</svg>`
         return `${indent}<span ${classAttr} role="img" aria-label=${JSON.stringify(label)} style={{ display: ${JSON.stringify(attrs.visible === false ? "none" : "inline-block")}, width: ${JSON.stringify(maskWidth)}, height: ${JSON.stringify(maskHeight)}, color: ${JSON.stringify(iconColor)}, backgroundColor: "currentColor", maskImage: ${mask}, WebkitMaskImage: ${mask}, maskSize: "contain", WebkitMaskSize: "contain", maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", maskPosition: "center", WebkitMaskPosition: "center" }} />`
       }
       return `${indent}<img ${classAttr} src=${JSON.stringify(svgSource)} alt=${JSON.stringify(String(attrs.altText || attrs.alt || attrs.name || ''))} />`
@@ -389,12 +470,14 @@ export function generateBundle(snapshot:Snapshot, options:RenderOptions = {}) {
       return `${indent}<img ${classAttr} src=${JSON.stringify(imageUrl)} alt=${JSON.stringify(String(attrs.altText || attrs.alt || attrs.name || ''))} />`
     }
     let tag = typeof node.text === 'string' ? 'p' : 'div'
+    if(typeof node.text!=='string'&&/^(main|nav|header|footer|aside|article|section|div)$/.test(attrs.htmlTag))tag=attrs.htmlTag
     if (/Heading|Title|H1/i.test(attrs.name || '') && typeof node.text === 'string') tag = 'h2'
-    if (typeof node.text === 'string' && /^(h[1-6]|p)$/.test(node.reference?.tag || '')) tag = node.reference!.tag!
+    if (typeof node.text === 'string' && /^(h[1-6]|p)$/.test(attrs.tag || node.reference?.tag || '')) tag = attrs.tag || node.reference!.tag!
     const link = safeLink(attrs.link)
     if (link) tag = 'a'
     const props = [`${classAttr}`]
     if(typeof attrs.ariaLabel==='string')props.push('aria-label='+JSON.stringify(attrs.ariaLabel))
+    if(typeof attrs.ariaHidden==='boolean')props.push('aria-hidden={'+attrs.ariaHidden+'}')
     if (link) {
       props.push(`href=${JSON.stringify(link)}`)
       if (attrs.linkOpenInNewTab) props.push('target="_blank"', 'rel="noopener noreferrer"')

@@ -1,3 +1,8 @@
+import {prepareEditorComponents} from './editor-components.ts'
+import {readProjectEditorCapture} from './project-editor-capture.ts'
+import {EDITOR_NODES,EDITOR_ICON_CONTROLS,parseEditorNodes,createEditorNodeResolver,type IconControls} from './editor-nodes.ts'
+import {EDITOR_SOURCE,parseEditorSource,createEditorTextResolver} from './editor-source.ts'
+import {prepareOfficialLayouts} from './official-layouts.ts'
 import {generatePreviewFiles,capturedNode} from './preview.ts'
 import {unpackCaptureDocuments,isCaptureDocument} from './cjson.ts'
 import {resolveExactIcon} from './icon-resolver.ts'
@@ -28,7 +33,7 @@ export function compileReactArchive(rawFiles:Readonly<ArchiveFiles>,...unsupport
  return compileDecoded(rawFiles,new Map())
 }
 const iconIdentity=(n:DesignNode)=>JSON.stringify([n.attributes?.icon??null,n.attributes?.set??n.attributes?.iconSetId??n.attributes?.iconSet??null])
-function compileDecoded(rawFiles:Readonly<ArchiveFiles>,icons:Map<string,string>){
+function compileDecoded(rawFiles:Readonly<ArchiveFiles>,icons:Map<string,string>,editor?:{layouts:LayoutSource;text:ReturnType<typeof createEditorTextResolver>;assets?:ArchiveFiles;components?:Awaited<ReturnType<typeof prepareEditorComponents>>}){
  const manifest=parse<Manifest>(rawFiles,'manifest.json')
  if(!/^framer-to-agent\/(folder|selection)-export-v[1-9]\d*$/.test(manifest.format||''))throw Error('Unsupported capture archive format')
  const pages=manifest.pages || (manifest.format.includes('selection')?[{path:'/',directory:'',breakpoints:[]}]:[])
@@ -66,9 +71,22 @@ function compileDecoded(rawFiles:Readonly<ArchiveFiles>,icons:Map<string,string>
  }
  // Layout definitions, when present, are part of the captured library. No external
  // evidence or supplemental file can alter this source-only compiler invocation.
- if(!source['library/layouts.json'])issues.push({stage:'capture',severity:'review',message:'No captured layout-template library; inherited layout completeness is unverified'})
+ if(!source['library/layouts.json']&&!editor)issues.push({stage:'capture',severity:'review',message:'No captured layout-template library; inherited layout completeness is unverified'})
  for(const svg of icons.values())source[svgPath(svg)]=svg
- const files=generatePreviewFiles(pages,source,{title:manifest.projectName||'Framer export',diagnostics,layoutSource:parseCapturedLayouts(source),resolveCapturedIcon:n=>icons.get(iconIdentity(n))||null})
+ Object.assign(source,editor?.assets??{},editor?.components?.assets??{})
+ if(editor?.components)issues.push(...editor.components.issues)
+ const files=generatePreviewFiles(pages,source,{title:manifest.projectName||'Framer export',diagnostics,layoutSource:editor?.layouts??parseCapturedLayouts(source),editorText:editor?.text,componentSource:editor?.components?.components,resolveCapturedIcon:n=>icons.get(iconIdentity(n))||null})
+ // Source completeness is independent of whether React builds successfully.
+ const editorReport=editor?.text.report()
+ const covered=new Set(editorReport?.scope.pages??[])
+ const typed=new Set(editorReport?.nodeScope??[])
+ const routeCoverage=pages.map(p=>({route:p.path,pageId:p.id??null,variants:p.breakpoints?.length||1,textSource:covered.has(p.id??''),nodeSource:typed.has(p.id??''),missingTypography:editorReport?.coverage.filter(r=>r.pageId===p.id&&r.missing.length).length??null}))
+ for(const p of routeCoverage){
+  if(!p.textSource)issues.push({stage:'capture',severity:'review',route:p.route,code:'editor-text-scope-missing',message:'Authoritative editor typography coverage missing'})
+  if(!p.nodeSource)issues.push({stage:'capture',severity:'review',route:p.route,code:'editor-node-scope-missing',message:'Authoritative editor node identity coverage missing'})
+  if(p.missingTypography)issues.push({stage:'capture',severity:'review',route:p.route,code:'missing-typography-fields',count:p.missingTypography,message:'Text nodes lack captured typography properties'})
+ }
+ files['preview/source-coverage.json']=JSON.stringify({format:'framer-to-agent/source-coverage-v1',totalRoutes:pages.length,textCoveredRoutes:routeCoverage.filter(p=>p.textSource).length,nodeCoveredRoutes:routeCoverage.filter(p=>p.nodeSource).length,componentDefinitions:editor?.components?{covered:editor.components.covered,total:editor.components.total}:null,routes:routeCoverage},null,2)
  let assets:AssetRecord[]=[];try{assets=parse<AssetManifest>(source,'assets/manifest.json').assets||[]}catch{issues.push({stage:'capture',severity:'warning',message:'Asset manifest missing'})}
  const mappings:[string,string][]=[]
  for(const a of assets){
@@ -118,7 +136,11 @@ export async function compileCapturedArchive(files:Readonly<ArchiveFiles>){
   const snapshot=JSON.parse(value) as Snapshot
   for(const root of snapshot.roots||[])visit(root)
  }
- const layouts=parseCapturedLayouts(decoded)
+ const {source:editor,nodes,controls}=readProjectEditorCapture(decoded,parse<Manifest>(decoded,'manifest.json'))
+ const editorNodes=nodes?await createEditorNodeResolver(nodes,controls):undefined
+ const componentSource=editor?await prepareEditorComponents(decoded,editor,controls):undefined
+ const editorLayouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'},controls,new Map([...(componentSource?.components??[])].map(([id,node])=>[node.id,id]))):null
+ const layouts=editorLayouts??parseCapturedLayouts(decoded)
  for(const template of layouts?.templates??[])for(const variant of template.variants)visit(variant.root)
  const icons=new Map<string,string>()
  for(const [key,node] of wanted){
@@ -126,5 +148,5 @@ export async function compileCapturedArchive(files:Readonly<ArchiveFiles>){
   const match=await resolveExactIcon(a.icon,a.set??a.iconSetId??a.iconSet)
   if(match?.svg)icons.set(key,safeSvg(match.svg))
  }
- return compileDecoded(decoded,icons)
+ return compileDecoded(decoded,icons,editor&&editorLayouts?{layouts:editorLayouts,text:createEditorTextResolver(editor,editorNodes),assets:editorNodes?.assets,components:componentSource}:undefined)
 }

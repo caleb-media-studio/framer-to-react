@@ -116,3 +116,21 @@ describe('exact sibling context',()=>{
   assert.ok(matchTexts([a('a','Alpha'),a('b','Beta')],[l(0,'Gamma'),l(1,'Delta')]).matches.every(m=>m.confidence!=='high'));
  })
 })
+
+describe('exact ancestor content context',()=>{
+ it('matches repeated cells only with a unique captured ancestor text signature',()=>{
+  const path=['Table','Row','Cell'];
+  const context=(s:string)=>JSON.stringify(['Row',[JSON.stringify(['Label','Same']),JSON.stringify(['Other',s])].sort()]);
+  const a=(id:string,s:string)=>({...arch(id,'Label','Same',path),ancestorContexts:[context(s)]});
+  const l=(id:number,s:string)=>({...live(id,'Label','Same',path),ancestorContexts:[context(s)]});
+  const r=matchTexts([a('a','A'),a('b','B')],[l(0,'B'),l(1,'A')]);
+  assert.deepEqual(r.matches.map(m=>[m.nodeId,m.liveIndex,m.confidence,m.method]),[['a',1,'high','name+text+ancestor-content'],['b',0,'high','name+text+ancestor-content']]);
+  assert.ok(matchTexts([a('a','A'),a('b','A')],[l(0,'A'),l(1,'A')]).matches.every(m=>m.confidence!=='high'));
+  assert.ok(matchTexts([a('a','A'),a('b','B')],[{...l(0,'A'),ancestorContexts:[context('A'),context('B')]},l(1,'C')]).matches.every(m=>m.confidence!=='high'));
+  assert.ok(matchTexts([a('a','A'),a('b','B')],[{...l(0,'A'),ancestors:['Other','Row','Cell']},l(1,'C')]).matches.every(m=>m.confidence!=='high'));
+ });
+ it('retains original component variant ancestry rather than substituting the instance name',()=>{
+  const root={id:'root',kind:'FrameNode',children:[{id:'instance',kind:'FrameNode',attributes:{name:'Instance',editorVariantName:'Variant'},children:[{id:'label',kind:'TextNode',text:'Open',attributes:{name:'Label'}}]}]};
+  assert.deepEqual(archiveTexts(root)[0].ancestors,['Instance','Variant']);
+ });
+});

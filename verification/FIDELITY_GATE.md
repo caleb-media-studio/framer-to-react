@@ -5,7 +5,7 @@ results; a change needs its own dated entry below with the reason and must not b
 
 Reference = the published Framer site, captured by `verification/evidence-sidecar.ts` (per-layer computed style + page bbox, with
 provenance) plus full-page screenshots taken by the gate itself. Candidate = the generated preview built from the
-enriched export. Both are rendered by the same Playwright Chromium at viewport {width, 900}, deviceScaleFactor 1,
+immutable source archive. Both are rendered by the same Playwright Chromium at viewport {width, 900}, deviceScaleFactor 1,
 reducedMotion reduce.
 
 ## Per text layer (paired by Framer node id: evidence `nodeId` ↔ preview `[data-f2a-node]`)
@@ -60,4 +60,13 @@ Gate passes only with 0 mismatches and 0 unverified across every manifest route 
 2026-11-24: fail closed via process exit status and explicit passed field, including empty/incomplete runs. No tolerance changes.
 
 2026-11-24: candidate URL adds fidelity=1 to disable only the generated preview's own tools launcher. Exported page content, layout, and pixel tolerances remain unchanged.
-\n2026-11-24: added an independent live-render text and thin-divider pass, with distinct-occurrence matching and stricter thickness verification. Existing tolerances unchanged.\n
+
+2026-11-24: added an independent live-render text and thin-divider pass, with distinct-occurrence matching and stricter thickness verification. Existing tolerances unchanged.
+
+2026-11-24: source evidence matching includes captured layout templates and skips actual closed overlay node types. No thresholds changed. Reports additionally record exact unequal RGBA pixel counts and unrounded ratios; --strict-pixels requires zero unequal pixels across all cases, in addition to the existing gate. Platform branding is included in full-page metrics; no screenshot masking is performed.
+
+2026-11-24: user explicitly excludes the Framer-injected platform branding badge from design fidelity. Only the known fixed body-level badge container and its direct Framer branding anchor are eligible. Hide the anchor in the isolated source browser before the comparison, exposing the underlying real design (no rectangular masks or discarded pixels). Save the untouched source screenshot as *.live.original.png and report unfiltered pixel counts separately. Published site, archive, generated app, and tolerances remain unchanged. Strict mode still requires zero unequal RGBA pixels in the badge-free design comparison.
+
+2026-11-24: require source screenshot stability. Compare the original and badge-free screenshots independently; changes outside the exact measured badge bounds or any image-dimension change are unverified. Both full images and all unfiltered and filtered candidate pixel counts are preserved. No candidate comparison masks, threshold changes, or additional exclusions. Exact pixel pass additionally requires equal image dimensions.
+
+2026-11-24: source-stability attribution includes computed outer box-shadow paint of the exact authorized badge subtree, not only the anchor box. Unsupported paint fails closed. A second full badge-free source screenshot must also match the first exactly, with equal image dimensions. This is an additional stability diagnostic only; every candidate pixel remains compared, including the entire formerly occupied badge area. No candidate masks or tolerance changes.

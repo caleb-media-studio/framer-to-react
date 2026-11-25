@@ -48,6 +48,7 @@ export interface ReusableVariant {path:string;route:string;tsx:string;blocks:Reu
 export interface RenderOptions {
   layoutSlot?:boolean
   resolveCapturedIcon?:(node:DesignNode)=>string|null
+  resolveCapturedColor?:import('./design-tokens.ts').ColorResolver
   collectReusable?:boolean
   referenceOverlay?:Overlay|null
   resolveCodeComponent?:(identifier:unknown)=>CodeImport|null

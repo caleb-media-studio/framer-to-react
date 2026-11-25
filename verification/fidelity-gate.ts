@@ -40,7 +40,7 @@ export function collectPreview(args: { ids: string[]; props: string[] }): Record
 }
 
 // Runs in a blank page: decodes both PNGs and counts pixels whose max channel delta exceeds the threshold.
-async function diffPngs(args: { a: string; b: string; channel: number }): Promise<{ differing: number; total: number; heights: [number, number] }> {
+export async function diffPngs(args: { a: string; b: string; channel: number; badgeBounds?: Box[] }): Promise<{ differing: number; total: number; heights: [number, number]; exactDiffering:number; sameDimensions:boolean; outsideBadgeDiffering:number }> {
   const load = async (b64: string): Promise<ImageBitmap> => createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
   const [ia, ib] = await Promise.all([load(args.a), load(args.b)]);
   const w = Math.max(ia.width, ib.width), h = Math.max(ia.height, ib.height);
@@ -50,24 +50,77 @@ async function diffPngs(args: { a: string; b: string; channel: number }): Promis
     return ctx.getImageData(0, 0, w, h).data;
   };
   const pa = pixels(ia), pb = pixels(ib);
-  let differing = 0;
+  let differing = 0, exactDiffering = 0, outsideBadgeDiffering = 0;
+  const badgeBounds=args.badgeBounds??[];
   for (let i = 0; i < pa.length; i += 4) {
+    if(pa[i]!==pb[i]||pa[i+1]!==pb[i+1]||pa[i+2]!==pb[i+2]||pa[i+3]!==pb[i+3]){
+      exactDiffering++;
+      // Diagnostic only: never subtract these pixels from the candidate comparison.
+      const x=(i/4)%w,y=Math.floor(i/4/w);
+      if(!badgeBounds.some(b=>x>=Math.floor(b.x)&&x<Math.ceil(b.x+b.width)&&y>=Math.floor(b.y)&&y<Math.ceil(b.y+b.height)))outsideBadgeDiffering++;
+    }
     if (Math.abs(pa[i] - pb[i]) > args.channel || Math.abs(pa[i + 1] - pb[i + 1]) > args.channel || Math.abs(pa[i + 2] - pb[i + 2]) > args.channel) differing++;
   }
-  return { differing, total: w * h, heights: [ia.height, ib.height] };
+  return { differing, exactDiffering, total: w * h, heights: [ia.height, ib.height], sameDimensions:ia.width===ib.width&&ia.height===ib.height, outsideBadgeDiffering };
 }
 
-async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; error?: string }> {
+/**
+ * Exclude only Framer's injected, out-of-flow platform branding from design fidelity.
+ * Run in the isolated source test page, never modify the editor or published site.
+ * Do not hide author-created links, other fixed elements, or arbitrary pixel regions.
+ */
+export function excludePlatformBadge(): {removed:number;bounds:Box[];paintBounds:Box[];unsupportedPaint:boolean} {
+  const container=document.getElementById('__framer-badge-container');
+  if(!container||container.parentElement!==document.body||getComputedStyle(container).position!=='fixed'||getComputedStyle(container).pointerEvents!=='none')return {removed:0,bounds:[],paintBounds:[],unsupportedPaint:false};
+  const bounds:Box[]=[],paintBounds:Box[]=[];
+  let unsupportedPaint=false;
+  for(const badge of Array.from(container.children)){
+    if(!(badge instanceof HTMLAnchorElement)||!badge.classList.contains('__framer-badge')||badge.getAttribute('data-nosnippet')!=='true')continue;
+    const target=new URL(badge.href,location.href);
+    if(target.protocol!=='https:'||!['framer.com','www.framer.com'].includes(target.hostname)||target.pathname!=='/')continue;
+    const r=badge.getBoundingClientRect();
+    bounds.push({x:r.x,y:r.y,width:r.width,height:r.height});
+    // The platform anchor's own descendant paint includes outer box shadows.
+    // Derive a conservative finite blur support from the computed CSS; never
+    // expand by a project-specific constant or exclude candidate pixels.
+    for(const el of [badge,...badge.querySelectorAll('*')]){
+      const r=el.getBoundingClientRect(),css=getComputedStyle(el);
+      if(!r.width||!r.height||!el.checkVisibility())continue;
+      paintBounds.push({x:r.x,y:r.y,width:r.width,height:r.height});
+      if(css.filter!=='none'||css.textShadow!=='none'||css.outlineStyle!=='none'||['::before','::after'].some(p=>!['none','normal'].includes(getComputedStyle(el,p).content)))unsupportedPaint=true;
+      if(css.boxShadow==='none')continue;
+      const matrix=css.transform==='none'?null:new DOMMatrixReadOnly(css.transform);
+      if(matrix&&(matrix.a!==1||matrix.b!==0||matrix.c!==0||matrix.d!==1)){unsupportedPaint=true;continue}
+      for(const shadow of css.boxShadow.replace(/rgba?\([^)]*\)/g,'').split(',')){
+        if(/\binset\b/.test(shadow))continue;
+        const parts=shadow.trim().split(/\s+/);
+        if(parts.length<2||parts.length>4||parts.some(v=>!/^[-+]?(?:\d+(?:\.\d+)?|\.\d+)px$/.test(v))){unsupportedPaint=true;continue}
+        const [dx,dy,blur=0,spread=0]=parts.map(parseFloat);
+        // Chromium's Gaussian box-shadow blur uses sigma approximately blur/2;
+        // a two-blur-radius support conservatively includes its antialias edge.
+        const extent=Math.max(0,spread+2*blur);
+        paintBounds.push({x:r.x+dx-extent,y:r.y+dy-extent,width:r.width+2*extent,height:r.height+2*extent});
+      }
+    }
+    badge.style.setProperty('display','none','important');
+  }
+  return {removed:bounds.length,bounds,paintBounds,unsupportedPaint};
+}
+
+async function shoot(browser: Browser, url: string, width: number, file: string, side:'source'|'candidate'): Promise<{ audit:RenderAudit;buf: Buffer; docH: number; responseSha256?:string; finalUrl:string; rawBuf?:Buffer; repeatBuf?:Buffer; platformBadge?:ReturnType<typeof excludePlatformBadge>; error?: string }> {
   const page = await browser.newPage({ viewport: { width, height: VIEWPORT_HEIGHT }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
   try {
     const res = await page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS });
     await page.evaluate(()=>document.fonts.ready);
     await page.waitForTimeout(SETTLE_MS);
     const responseSha256=res?.ok()?createHash('sha256').update(await res.body()).digest('hex'):undefined;
+    const rawBuf=side==='source'?await page.screenshot({path:file.replace(/\.png$/,'.original.png'),fullPage:true}):undefined;
+    const platformBadge=side==='source'?await page.evaluate(excludePlatformBadge):undefined;
     const docH = await page.evaluate(() => document.documentElement.scrollHeight);
     const audit = await page.evaluate(collectRenderAudit,side);
     const buf = await page.screenshot({ path: file, fullPage: true });
-    return { audit,buf, docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
+    const repeatBuf=side==='source'?await page.screenshot({path:file.replace(/\.png$/,'.repeat.png'),fullPage:true}):undefined;
+    return { audit,buf,rawBuf,repeatBuf,platformBadge,docH, responseSha256, finalUrl:page.url(), error: res && res.ok() ? undefined : `HTTP ${res?.status() ?? 'none'}` };
   } finally { await page.close(); }
 }
 
@@ -124,10 +177,27 @@ async function runCase(browser: Browser, route: string, width: number, evidenceD
   mismatches.push(...audit.findings);
   const blank = await browser.newPage();
   const d = await blank.evaluate(diffPngs, { a: l.buf.toString('base64'), b: p.buf.toString('base64'), channel: TOL.pixelChannel });
+  const raw=l.rawBuf?await blank.evaluate(diffPngs,{a:l.rawBuf.toString('base64'),b:p.buf.toString('base64'),channel:TOL.pixelChannel}):null;
+  // Removing the exact platform anchor must not change any other rendered pixel.
+  // Keep the full original and filtered images and their full candidate metrics
+  // even when the source changes between captures; instability never counts as a pass.
+  const sourceStability=l.rawBuf?await blank.evaluate(diffPngs,{a:l.rawBuf.toString('base64'),b:l.buf.toString('base64'),channel:TOL.pixelChannel,badgeBounds:l.platformBadge?.paintBounds??[]}):null;
+  const sourceRepeat=l.repeatBuf?await blank.evaluate(diffPngs,{a:l.buf.toString('base64'),b:l.repeatBuf.toString('base64'),channel:TOL.pixelChannel}):null;
   await blank.close();
+  result.sourceStability=sourceStability;
+  result.sourceRepeat=sourceRepeat;
+  if(!sourceRepeat||!sourceRepeat.sameDimensions||sourceRepeat.exactDiffering!==0)unverified.push('source repeated screenshot changed without any badge toggle');
+  if(!sourceStability||!sourceStability.sameDimensions||sourceStability.outsideBadgeDiffering!==0||l.platformBadge?.unsupportedPaint)unverified.push('source screenshot changed outside verified platform badge paint or paint unsupported');
+  result.platformBadge=l.platformBadge;
+  if(raw)result.unfilteredPixels={differing:raw.differing,exactDiffering:raw.exactDiffering,total:raw.total,ratio:raw.differing/raw.total,exactRatio:raw.exactDiffering/raw.total};
   const v = pixelVerdict(d.differing, d.total, [l.docH, p.docH]);
   result.docH = [l.docH, p.docH];
   result.pixelRatio = Math.round(v.ratio * 1e5) / 1e5;
+  result.pixelDiffering=d.differing;
+  result.pixelExactDiffering=d.exactDiffering;
+  result.pixelDimensionsEqual=d.sameDimensions;
+  result.pixelTotal=d.total;
+  result.pixelExactRatio=d.exactDiffering/d.total;
   if (!v.pass) mismatches.push({ nodeId: '(page)', name: 'full-page screenshot', fields: [{ field: 'pixels', expected: `≤${TOL.pixelRatio}`, actual: result.pixelRatio as number }, { field: 'docH', expected: l.docH, actual: p.docH }] });
   return { ...result, mismatchLayers: mismatches.length, unverifiedCount: unverified.length, mismatches, unverified };
 }
@@ -170,10 +240,12 @@ async function main(): Promise<void> {
   };
   try { await Promise.all(Array.from({ length: Number(flag('--workers') ?? 3) }, worker)); } finally { await browser.close(); }
   results.sort((a, b) => String(a.route).localeCompare(String(b.route)) || Number(a.width) - Number(b.width));
+  const strictPixels=process.argv.includes('--strict-pixels');
+  const exactPixelCases=results.filter(r=>r.pixelExactDiffering===0&&r.pixelDimensionsEqual===true).length;
   const totals = { cases: results.length, passing: results.filter((r) => r.mismatchLayers === 0 && r.unverifiedCount === 0).length, mismatchLayers: results.reduce((s, r) => s + Number(r.mismatchLayers), 0), unverified: results.reduce((s, r) => s + Number(r.unverifiedCount), 0) };
   const captureComplete=!!manifest && !manifest.failures?.length && (manifest.requestedPages??manifest.pages.length)===manifest.pages.length;
-  const passed = gatePassed(totals, cases.length) && (!fullScope||captureComplete);
-  writeFileSync(join(outDir, 'gate.json'), JSON.stringify({ passed, scope:fullScope?'full-project':'selected-routes', captureComplete, expectedCases: cases.length, tolerances: TOL, totals, results }, null, 2));
+  const passed = gatePassed(totals, cases.length) && (!fullScope||captureComplete) && (!strictPixels||exactPixelCases===cases.length);
+  writeFileSync(join(outDir, 'gate.json'), JSON.stringify({ passed, strictPixels, exactPixelCases, scope:fullScope?'full-project':'selected-routes', captureComplete, expectedCases: cases.length, tolerances: TOL, totals, results }, null, 2));
   console.log(JSON.stringify({ passed, totals }));
   if (!passed) process.exitCode = 1;
 }

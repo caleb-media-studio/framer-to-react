@@ -1,3 +1,5 @@
+import {EDITOR_COMPONENTS,prepareEditorComponents} from '../src/editor-components.ts';
+import {readProjectEditorCapture,EDITOR_PROJECT} from '../src/project-editor-capture.ts';
 // Opt-in evidence sidecar: measures the *published* site (not the editor) at the four QA widths and attaches its computed
 // text styles and bounding boxes to archive TextNodes that match reliably (schema/evidence-match.ts). Output is evidence
 // with provenance and confidence, kept separate from the export; it never fills a field for an unmatched node.
@@ -11,7 +13,10 @@ import { chromium } from '@playwright/test';
 
 import {expandCanvasTree} from '../src/generator.ts';
 import {collectCanvasComponents} from '../src/preview.ts';
-import type {ArchiveFiles,DesignNode} from '../src/types.ts';
+import type {ArchiveFiles,DesignNode,Manifest} from '../src/types.ts';
+import {EDITOR_SOURCE,parseEditorSource,createEditorTextResolver} from '../src/editor-source.ts';
+import {EDITOR_NODES,EDITOR_ICON_CONTROLS,parseEditorNodes,createEditorNodeResolver,type IconControls} from '../src/editor-nodes.ts';
+import {prepareOfficialLayouts,selectLayoutVariant} from '../src/official-layouts.ts';
 import { archiveTexts, breakpointForWidth, matchTexts, type LiveText } from './evidence-match.ts';
 
 const WIDTHS = [390, 810, 1200, 1920] as const;
@@ -51,8 +56,22 @@ export function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[]
     }
     return parts.join('>');
   };
-  return [...document.querySelectorAll('[data-framer-component-type="RichTextContainer"]')]
-    .filter((el) => el.checkVisibility())
+  const selector='[data-framer-component-type="RichTextContainer"]';
+  const normalize=(s:string)=>s.normalize('NFC').replace(/\s+/g,' ').trim();
+  const visible=[...document.querySelectorAll(selector)].filter(el=>el.checkVisibility());
+  const visibleSet=new Set(visible);
+  const contextMemo=new WeakMap<Element,string[]>();
+  const contents=(parent:Element)=>{
+    if(contextMemo.has(parent))return contextMemo.get(parent)!;
+    const entries:string[]=[];
+    for(const el of parent.querySelectorAll(selector)){
+      if(!visibleSet.has(el)||!el.textContent?.trim())continue;
+      entries.push(JSON.stringify([el.getAttribute('data-framer-name')??'',normalize(el.textContent)]));
+      if(entries.length>64)break;
+    }
+    contextMemo.set(parent,entries);return entries;
+  };
+  return visible
     .map((el) => {
       // Preserve the semantic block for tag/break metadata, but measure the same
       // text-bearing element as the candidate gate and rendered-surface audit.
@@ -96,7 +115,17 @@ export function collectLive(props: readonly string[]): Omit<LiveText, 'index'>[]
         })() : undefined;
       const siblingText = [...(el.parentElement?.children ?? [])].filter(s=>s!==el && s.getAttribute('data-framer-component-type')==='RichTextContainer' && s.checkVisibility() && s.textContent?.trim())
         .map(s=>JSON.stringify([s.getAttribute('data-framer-name')??'',(s.textContent??'').normalize('NFC').replace(/\s+/g,' ').trim()]));
+      const own=JSON.stringify([el.getAttribute('data-framer-name')??'',normalize(el.textContent??'')]);
+      const ancestorContexts:string[]=[];
+      let namedParents=0;
+      for(let parent=el.parentElement;parent&&parent!==document.body&&namedParents<3;parent=parent.parentElement){
+        const name=parent.getAttribute('data-framer-name');if(!name)continue;
+        namedParents++;
+        const entries=contents(parent);
+        if(entries.length>=2&&entries.length<=64&&entries.some(x=>x!==own))ancestorContexts.push(JSON.stringify([name,[...entries].sort()]));
+      }
       return {
+        ...(ancestorContexts.length?{ancestorContexts}:{}),
         ...(siblingText.length ? {siblingText} : {}),
         name: el.getAttribute('data-framer-name') ?? '',
         text: (el.textContent ?? '').normalize('NFC').replace(/\s+/g, ' ').trim(),
@@ -129,7 +158,28 @@ async function main(): Promise<void> {
       if(existsSync(file))library[key]=readFileSync(file,'utf8')
     }
   }
-  const canvas=collectCanvasComponents(library)
+  let canvas=collectCanvasComponents(library)
+  const manifest=JSON.parse(readFileSync(join(exportDir,'manifest.json'),'utf8')) as Manifest
+  // Use exactly the same original-source adapter as the compiler.
+  const sourceFiles:ArchiveFiles={}
+  for(const key of [EDITOR_SOURCE,EDITOR_NODES,EDITOR_ICON_CONTROLS,EDITOR_PROJECT,EDITOR_COMPONENTS]){
+    const file=join(exportDir,key);if(existsSync(file))sourceFiles[key]=readFileSync(file,'utf8')
+  }
+  if(typeof sourceFiles[EDITOR_PROJECT]==='string'){
+    const index=JSON.parse(sourceFiles[EDITOR_PROJECT] as string)
+    for(const entry of index.pages??[]){
+      if(typeof entry.id!=='string'||!/^[A-Za-z0-9_-]+$/.test(entry.id)||entry.file!=='library/editor-pages/'+entry.id+'.json')throw Error('Invalid project source member')
+      sourceFiles[entry.file]=readFileSync(join(exportDir,entry.file),'utf8')
+    }
+  }
+  const {source:editor,nodes,controls}=readProjectEditorCapture(sourceFiles,manifest)
+  const editorNodes=nodes?await createEditorNodeResolver(nodes,controls):undefined
+  const componentSource=editor?await prepareEditorComponents({...library,...sourceFiles},editor,controls):undefined
+  if(componentSource)canvas=componentSource.components
+  const textResolver=editor?createEditorTextResolver(editor,editorNodes):undefined
+  const layouts=editor?await prepareOfficialLayouts({...editor,format:'framer-to-agent/official-layout-tree-v1'},controls,new Map([...canvas].map(([id,node])=>[node.id,id]))):null
+  const spliceContent=(node:DesignNode,content:DesignNode):DesignNode=>node.kind==='PlaceholderNode'?content:{...node,children:(node.children??[]).map(n=>spliceContent(n,content))}
+
   const routes = !process.argv.includes('--routes') ? ['/'] : routesArg === 'all' ? designs.map((d) => d.pagePath) : routesArg.split(',');
   mkdirSync(outDir, { recursive: true });
 
@@ -154,7 +204,14 @@ async function main(): Promise<void> {
         const live = (await page.evaluate(collectLive, STYLE_PROPS)).map((l, index) => ({ ...l, index }));
         const userAgent = await page.evaluate(() => navigator.userAgent);
 
-        const archive = frame ? archiveTexts(expandCanvasTree(frame as DesignNode,id=>canvas.get(String(id))||null)) : [];
+        const record=manifest.pages?.find(p=>p.path===route)
+        const typed=frame?textResolver?.resolve({roots:[frame as DesignNode]},record?.id??'').roots[0]??frame as DesignNode:null
+        const binding=layouts?.bindings.find(p=>p.id===record?.id&&p.path===route)
+        const template=layouts?.templates.find(t=>t.id===binding?.layout)
+        // The page breakpoint is an editor-only wrapper, not a named ancestor in
+        // the published DOM. Keep its identity and children, but omit its name.
+        const combined=typed&&template?spliceContent(selectLayoutVariant(template,width).root,{...typed,attributes:{...typed.attributes,name:''}}):typed
+        const archive = combined ? archiveTexts(expandCanvasTree(combined,id=>canvas.get(String(id))||null)) : [];
         const result = frame ? matchTexts(archive, live) : { matches: [], unmatchedArchive: [], unmatchedLive: live.map((l) => l.index) };
         const evidence = result.matches.map((m) => {
           const l = live[m.liveIndex];
